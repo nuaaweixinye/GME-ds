@@ -64,6 +64,7 @@ import * as ToolTodo from '@deepseek-ai/dsh-tool-todo'
 import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import { registerListSubagentModels } from '../packages/subagent/tool-subagent/src/list-models.ts'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
+import * as ToolWeknora from '../packages/web/tool-weknora/src/index.ts'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
@@ -589,6 +590,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-weknora',
+    dir: 'tool-weknora',
+    source: 'packages/web/tool-weknora/src/index.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'ctx.credentials or launch environment at call time'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(ToolWeknora, {
+        baseURL: 'http://weknora.example.invalid',
+        knowledgeBaseIds: ['catalog-kb'],
+      })
+    },
+    note:
+      'knowledge_search is an opt-in WeKnora retrieval tool. The catalog uses a dummy base URL and knowledge-base id because credentials and network access resolve only when the tool executes.',
   },
 ]
 

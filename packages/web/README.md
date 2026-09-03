@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The `web/` group gives the harness web access — searching the web and fetching URLs — through one provider-neutral service (`ctx.web`) and the backends and tools that use it. A deployment mounts one or more backends — Exa, Perplexity, or DeepSeek for search, anonymous HTTP(S) for fetch — and the service picks a usable provider per operation, so the model-facing tools stay stable while backends come and go. Six packages split the family: the `web/` service that owns provider selection and errors, three search backends, one fetch backend, and `tool-web/`, which exposes `web_search` and `web_fetch` to the model. The group owns web access only: no browsing or extraction, no per-URL policy, and each backend keeps its own resource caps. Search and fetch deliberately share one service so selection, cancellation, errors, and configuration have a single owner.
+The `web/` group gives the harness web access — searching the web and fetching URLs — through one provider-neutral service (`ctx.web`) and the backends and tools that use it. A deployment mounts one or more backends — Exa, Perplexity, or DeepSeek for search, anonymous HTTP(S) for fetch — and the service picks a usable provider per operation, so the model-facing tools stay stable while backends come and go. Seven packages split the family: the `web/` service that owns provider selection and errors, three search backends, one fetch backend, `tool-web/`, which exposes `web_search` and `web_fetch` to the model, and `tool-weknora/`, which exposes configured WeKnora knowledge-base search. The group owns web access only: no browsing or extraction, no per-URL policy, and each backend keeps its own resource caps. Search and fetch deliberately share one service so selection, cancellation, errors, and configuration have a single owner.
 
 ## Table of Contents
 
@@ -22,7 +22,7 @@ The `web/` group gives the harness web access — searching the web and fetching
 <a id="packages"></a>
 ## Packages
 
-Six packages play the web roles; the subsystem reference owns the exhaustive vocabulary and contracts.
+Seven packages play the web roles; the subsystem reference owns the exhaustive vocabulary and contracts.
 
 | Package | Role | ctx key |
 |---|---|---|
@@ -32,6 +32,7 @@ Six packages play the web roles; the subsystem reference owns the exhaustive voc
 | [`web-search-deepseek/`](web-search-deepseek/README.md) | Searches the web through DeepSeek native search | registers on `ctx.web` |
 | [`web-fetch-http/`](web-fetch-http/README.md) | Fetches public HTTP(S) pages anonymously | registers on `ctx.web` |
 | [`tool-web/`](tool-web/README.md) | Exposes `web_search` and `web_fetch` to the model | registers on `ctx.tools` |
+| [`tool-weknora/`](tool-weknora/README.md) | Exposes configured WeKnora knowledge-base search to the model | registers on `ctx.tools` |
 
 -----
 

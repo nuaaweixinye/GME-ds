@@ -3027,6 +3027,39 @@ export interface Config {
 
 Source: [`packages/web/tool-web/src/index.ts:37`](../packages/web/tool-web/src/index.ts)
 
+<a id="deepseek-aidsh-tool-weknora"></a>
+
+## `@deepseek-ai/dsh-tool-weknora`
+
+Requires: `tools` · `systemPrompt`
+
+```ts config-catalog
+/** Plugin config. */
+export interface Config {
+  /** WeKnora API base URL, for example `http://172.16.220.222`. */
+  baseURL: string
+  /** Credential reference resolved for each tool call. Defaults to `WEKNORA_API_KEY`. */
+  apiKeyEnv?: string
+  /** Default knowledge-base IDs used when the model omits `knowledge_base_ids`. */
+  knowledgeBaseIds?: string[]
+  /** Default result count sent as `top_k`. */
+  defaultTopK?: number
+  /** Upper bound on model-supplied `top_k`. */
+  maxTopK?: number
+  /** Cooperative tool-call timeout budget in milliseconds. */
+  timeoutMs?: number
+  /** WeKnora `resource_urls` query parameter. Use `public` only when the key is allowed to request public URLs. */
+  resourceUrls?: ResourceUrlsMode
+  /** Upper bound on retained result text across all returned chunks. */
+  maxOutputChars?: number
+}
+
+/** WeKnora resource URL rewrite mode passed as the `resource_urls` query parameter. */
+export type ResourceUrlsMode = 'handle' | 'public'
+```
+
+Source: [`packages/web/tool-weknora/src/index.ts:33`](../packages/web/tool-weknora/src/index.ts)
+
 <a id="deepseek-aidsh-tool-workflow"></a>
 
 ## `@deepseek-ai/dsh-tool-workflow`

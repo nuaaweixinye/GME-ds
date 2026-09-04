@@ -70,6 +70,17 @@ describe('FishLogo', () => {
   })
 })
 
+describe('GmeLogo', () => {
+  it('renders the GME logo asset at the requested square size', () => {
+    const { container } = render(<primitives.GmeLogo size={34} className="hero" />)
+    const svg = container.querySelector('svg')!
+    expect(svg.getAttribute('width')).toBe('34')
+    expect(svg.getAttribute('height')).toBe('34')
+    expect(svg.classList.contains('hero')).toBe(true)
+    expect(svg.querySelector('image')?.getAttribute('href')).toBe('/gme-logo.png')
+  })
+})
+
 describe('BrandWordmark', () => {
   it('can render the name artwork with or without its leading mark', () => {
     const view = render(<primitives.BrandWordmark />)

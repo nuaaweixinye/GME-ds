@@ -17,6 +17,7 @@ This table connects model-visible tool names to the plugin package and service s
 | --- | --- | --- | --- | --- | --- |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
+| `@deepseek-ai/dsh-tool-gme` | `gme_build`, `gme_delivery_check`, `gme_locate_api`, `gme_project_status`, `gme_test` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `host filesystem and processes for build/test calls` | - | The GME tools validate a GME-ACIS checkout and constrained domain arguments before inspecting Git, locating APIs, or running CMake and GoogleTest through the mounted shell executor. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
@@ -147,6 +148,175 @@ Execute a TypeScript program against the available tools. Takes two required arg
 Source: [`packages/core/tools/src/ptc.ts`](../packages/core/tools/src/ptc.ts)
 
 Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result.
+
+<a id="deepseek-aidsh-tool-gme"></a>
+
+## `@deepseek-ai/dsh-tool-gme`
+
+### `gme_build`
+
+Configure and build a validated GME-ACIS all-module or single-development-module target.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root."
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "all",
+        "module"
+      ]
+    },
+    "module": {
+      "type": "string",
+      "description": "Module name required for module scope, for example constructors."
+    },
+    "configuration": {
+      "type": "string",
+      "description": "Build configuration. Defaults to Debug.",
+      "enum": [
+        "Debug",
+        "Release",
+        "RelWithDebInfo"
+      ]
+    },
+    "target": {
+      "type": "string",
+      "description": "CMake target. Defaults to tests."
+    },
+    "build_directory": {
+      "type": "string",
+      "description": "Relative build directory. Defaults to build."
+    },
+    "configure": {
+      "type": "boolean",
+      "description": "Run CMake configure before build. Defaults to true."
+    }
+  },
+  "required": [
+    "scope"
+  ]
+}
+```
+
+Source: [`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+### `gme_delivery_check`
+
+Check changed GME submodules and added production lines for direct calls to one forbidden ACIS symbol before delivery.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root."
+    },
+    "forbidden_symbol": {
+      "type": "string",
+      "description": "Corresponding ACIS C++ symbol that production changes must not call."
+    }
+  },
+  "required": [
+    "forbidden_symbol"
+  ]
+}
+```
+
+Source: [`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+### `gme_locate_api`
+
+Locate a GME or ACIS C++ symbol in the current checkout and report declarations, implementations, tests, module dependencies, and affected dependants.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root."
+    },
+    "symbol": {
+      "type": "string",
+      "description": "C++ identifier to locate, for example gme_api_make_box."
+    }
+  },
+  "required": [
+    "symbol"
+  ]
+}
+```
+
+Source: [`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+### `gme_project_status`
+
+Inspect a GME-ACIS superproject before making changes. Reports branch, cleanliness, recursive submodule state, Git, and CMake.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root. Defaults to configured root or session workspace."
+    }
+  }
+}
+```
+
+Source: [`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+### `gme_test`
+
+Run an explicit GoogleTest filter from an existing GME-ACIS build.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root."
+    },
+    "filter": {
+      "type": "string",
+      "description": "Explicit GoogleTest filter."
+    },
+    "configuration": {
+      "type": "string",
+      "description": "Build configuration. Defaults to Debug.",
+      "enum": [
+        "Debug",
+        "Release",
+        "RelWithDebInfo"
+      ]
+    },
+    "build_directory": {
+      "type": "string",
+      "description": "Relative build directory. Defaults to build."
+    },
+    "repeat": {
+      "type": "integer",
+      "description": "Repeat count from 1 to 100. Defaults to 1."
+    }
+  },
+  "required": [
+    "filter"
+  ]
+}
+```
+
+Source: [`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+The GME tools validate a GME-ACIS checkout and constrained domain arguments before inspecting Git, locating APIs, or running CMake and GoogleTest through the mounted shell executor.
 
 <a id="deepseek-aidsh-plan-mode"></a>
 

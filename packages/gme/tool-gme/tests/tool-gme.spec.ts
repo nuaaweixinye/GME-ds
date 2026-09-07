@@ -9,6 +9,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { buildGmeCommand, buildGtestCommand } from '../src/commands.ts'
 import { parseModuleDependencies } from '../src/indexer.ts'
+import { inspectDeliveryDiff } from '../src/delivery.ts'
 import * as ToolGme from '../src/index.ts'
 
 const signal = new AbortController().signal
@@ -277,6 +278,93 @@ describe('GME P1 API index', () => {
 
     expect(result.isError).toBe(true)
     expect(firstText(result)).toContain('symbol must be a C++ identifier')
+    expect(runtime.shell.requests).toHaveLength(0)
+  })
+})
+
+describe('GME P2 delivery gate', () => {
+  const roots: string[] = []
+  const disposers: Array<() => Promise<void>> = []
+
+  afterEach(async () => {
+    while (disposers.length > 0) await disposers.pop()?.()
+    while (roots.length > 0) await rm(roots.pop()!, { recursive: true, force: true })
+  })
+
+  it('finds forbidden ACIS calls only on added production lines', () => {
+    const report = inspectDeliveryDiff(`
+diff --git a/module/constructors/src/box.cpp b/module/constructors/src/box.cpp
+--- a/module/constructors/src/box.cpp
++++ b/module/constructors/src/box.cpp
+@@ -8 +8,2 @@
+-  return api_make_box(input, output);
++  prepare_output(output);
++  return api_make_box(input, output);
+diff --git a/tests/gme/src/constructors/box_test.cpp b/tests/gme/src/constructors/box_test.cpp
+--- a/tests/gme/src/constructors/box_test.cpp
++++ b/tests/gme/src/constructors/box_test.cpp
+@@ -10,0 +11 @@
++  EXPECT_TRUE(api_make_box(input, acis_output).ok());
+`, 'api_make_box')
+
+    expect(report).toEqual([{
+      path: 'module/constructors/src/box.cpp',
+      line: 9,
+      text: 'return api_make_box(input, output);',
+    }])
+  })
+
+  it('reports changed submodules and forbidden production calls through the tool', async () => {
+    const root = await fixtureRoot()
+    roots.push(root)
+    const runtime = await mount(root)
+    disposers.push(runtime.dispose)
+    runtime.shell.handler = (spec) => {
+      if (spec.command === 'git status --porcelain=v1') {
+        return shellResult(' m module/constructors\n')
+      }
+      if (spec.command === 'git submodule status --recursive') {
+        return shellResult(' 1111111 module/constructors (heads/work)\n 2222222 tests/gme (heads/main)\n')
+      }
+      if (spec.command === 'git rev-parse HEAD:module/constructors') {
+        return shellResult(`${'a'.repeat(40)}\n`)
+      }
+      if (spec.command === 'git diff --unified=0 --no-ext-diff HEAD') {
+        if (spec.workdir === root) return shellResult('')
+      }
+      if (spec.command === `git diff --unified=0 --no-ext-diff ${'a'.repeat(40)} --`) {
+        return shellResult(
+          'diff --git a/src/box.cpp b/src/box.cpp\n'
+          + '--- a/src/box.cpp\n'
+          + '+++ b/src/box.cpp\n'
+          + '@@ -20,0 +21 @@\n'
+          + '+return api_make_box(input, output);\n',
+        )
+      }
+      return shellResult('', { exitCode: 1 })
+    }
+
+    const result = await runtime.call('gme_delivery_check', { forbidden_symbol: 'api_make_box' })
+
+    expect(result.isError).toBe(false)
+    expect(firstText(result)).toContain('Changed submodules: module/constructors (dirty)')
+    expect(firstText(result)).toContain('Forbidden production calls: 1')
+    expect(firstText(result)).toContain('module/constructors/src/box.cpp:21')
+    expect(runtime.shell.requests).toContainEqual(expect.objectContaining({
+      command: `git diff --unified=0 --no-ext-diff ${'a'.repeat(40)} --`,
+      workdir: join(root, 'module', 'constructors'),
+    }))
+  })
+
+  it('rejects an invalid forbidden symbol before Git execution', async () => {
+    const root = await fixtureRoot()
+    roots.push(root)
+    const runtime = await mount(root)
+    disposers.push(runtime.dispose)
+
+    const result = await runtime.call('gme_delivery_check', { forbidden_symbol: 'api_box; exit' })
+
+    expect(result.isError).toBe(true)
     expect(runtime.shell.requests).toHaveLength(0)
   })
 })

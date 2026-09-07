@@ -2709,6 +2709,24 @@ export interface Config {
 
 来源：[`packages/fs/tool-fs-search/src/index.ts:73`](../packages/fs/tool-fs-search/src/index.ts)
 
+<a id="deepseek-aidsh-tool-gme"></a>
+
+## `@deepseek-ai/dsh-tool-gme`
+
+需要：`tools` · `shell` · `systemPrompt`
+
+```ts config-catalog
+/** GME tool plugin configuration. */
+export interface Config {
+  /** Fixed GME-ACIS root. When omitted, tools resolve from the calling session cwd. */
+  projectRoot?: string
+  /** Maximum foreground command duration in milliseconds. */
+  timeoutMs?: number
+}
+```
+
+来源：[`packages/gme/tool-gme/src/index.ts:16`](../packages/gme/tool-gme/src/index.ts)
+
 <a id="deepseek-aidsh-tool-goal"></a>
 
 ## `@deepseek-ai/dsh-tool-goal`
@@ -3486,6 +3504,7 @@ export interface Config {
 - `@deepseek-ai/dsh-experimental-agent-team-web-profile`（[`packages/experimental/agent-team-web-profile/src/index.ts`](../packages/experimental/agent-team-web-profile/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-webworker-packer`（[`packages/experimental/webworker-packer/src/index.ts`](../packages/experimental/webworker-packer/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-webworker-runtime`（[`packages/experimental/webworker-runtime/src/index.ts`](../packages/experimental/webworker-runtime/src/index.ts)）
+- `@deepseek-ai/dsh-gme-profile`（[`packages/gme/profile/src/index.ts`](../packages/gme/profile/src/index.ts)）
 - `@deepseek-ai/dsh-home-paths`（[`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts)）
 - `@deepseek-ai/dsh-hook-protocol`（[`packages/hooks/hook-protocol/src/index.ts`](../packages/hooks/hook-protocol/src/index.ts)）
 - `@deepseek-ai/dsh-launch-environment`（[`packages/util/launch-environment/src/index.ts`](../packages/util/launch-environment/src/index.ts)）

@@ -48,6 +48,7 @@ import CordisHostRunner from '@deepseek-ai/dsh-cordis-host-runner'
 import * as ToolCordis from '@deepseek-ai/dsh-tool-cordis'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
+import * as ToolGme from '../packages/gme/tool-gme/src/index.ts'
 import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as ToolPty from '@deepseek-ai/dsh-tool-terminal'
@@ -214,6 +215,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
     async mount() {},
     note:
       'Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry\'s only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime\'s language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-gme',
+    dir: 'tool-gme',
+    source: 'packages/gme/tool-gme/src/index.ts',
+    requires: ['ctx.tools', 'ctx.shell', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'tool/result', 'host filesystem and processes for build/test calls'],
+    async mount(ctx) {
+      await ctx.plugin(LocalSubprocessRuntime)
+      if (process.platform === 'win32') await ctx.plugin(PwshLocalExecutor)
+      else await ctx.plugin(LocalBashExecutor)
+      await ctx.plugin(ToolGme, { projectRoot: 'GME-catalog-placeholder' })
+    },
+    note:
+      'The GME tools validate a GME-ACIS checkout and constrained domain arguments before inspecting Git, locating APIs, or running CMake and GoogleTest through the mounted shell executor.',
   },
   {
     pkg: '@deepseek-ai/dsh-plan-mode',

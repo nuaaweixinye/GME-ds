@@ -1,0 +1,27 @@
+# GME project layer. Apply after dsh-base (and dsh-web-app for the Web UI).
+
+- id: skill-filesystem
+  disabled: false
+  config:
+    includeDefaultRoots: true
+    customSkillDirs:
+      - !!js process.env.GME_SKILLS_DIR ?? 'D:/workspace/GME-Skills/.dsh/skills'
+
+- insert:
+    - id: tool-gme
+      name: '@deepseek-ai/dsh-tool-gme'
+      config:
+        projectRoot: !!js process.env.GME_PROJECT_ROOT ?? 'D:/workspace/GME-ACIS'
+        timeoutMs: 600000
+
+    - id: tool-weknora
+      name: '@deepseek-ai/dsh-tool-weknora'
+      config:
+        baseURL: http://172.16.220.222
+        apiKeyEnv: WEKNORA_API_KEY
+        knowledgeBaseIds: !!js (process.env.GME_WEKNORA_KB_IDS ?? 'e2c3bf22-5226-4463-8742-8406a287cdb6').split(',').map(value => value.trim()).filter(Boolean)
+        defaultTopK: 5
+        maxTopK: 20
+        timeoutMs: 30000
+        resourceUrls: handle
+        maxOutputChars: 20000

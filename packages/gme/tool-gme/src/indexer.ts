@@ -1,12 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 
+/** Query views over module dependencies parsed from the root CMake file. */
 export interface ModuleGraph {
   direct(module: string): string[]
   transitive(module: string): string[]
   dependants(module: string): string[]
 }
 
+/** One classified source match for a GME or ACIS API symbol. */
 export interface GmeApiMatch {
   path: string
   line: number
@@ -14,6 +16,7 @@ export interface GmeApiMatch {
   kind: 'declaration' | 'implementation' | 'test'
 }
 
+/** Canonical source and dependency context for one located API symbol. */
 export interface GmeApiLocation {
   symbol: string
   module?: string
@@ -24,13 +27,18 @@ export interface GmeApiLocation {
   truncated: boolean
 }
 
+/** Shell command runner used by the live API indexer. */
 export type IndexCommandRunner = (command: string) => Promise<ShellRunResult>
 
 function sorted(values: Iterable<string>): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right))
 }
 
-/** Parse the root CMake module dependency declarations into queryable graph views. */
+/**
+ * Parse the root CMake module dependency declarations into queryable graph views.
+ * @param cmakeText - Root CMake source containing `<MODULE>_DEPS` declarations.
+ * @returns Direct, transitive, and reverse dependency queries.
+ */
 export function parseModuleDependencies(cmakeText: string): ModuleGraph {
   const edges = new Map<string, string[]>()
   const declarations = /set\(\s*([A-Z][A-Z0-9_]*)_DEPS\s*([\s\S]*?)\)/g
@@ -75,6 +83,10 @@ export function parseModuleDependencies(cmakeText: string): ModuleGraph {
   }
 }
 
+/**
+ * Validate a plain or namespace-qualified C++ symbol.
+ * @param symbol - Candidate symbol.
+ */
 export function validateCppSymbol(symbol: string): void {
   if (!/^[A-Za-z_][A-Za-z0-9_:~]*$/.test(symbol)) {
     throw new Error('symbol must be a C++ identifier, optionally namespace-qualified')
@@ -113,7 +125,14 @@ function moduleFromPath(path: string): string | undefined {
   return /^(?:module|include\/gme|tests\/gme\/(?:src|include\/tests))\/([^/]+)/.exec(normalized)?.[1]
 }
 
-/** Locate one symbol in the current checkout and derive its module impact. */
+/**
+ * Locate one symbol in the current checkout and derive its module impact.
+ * @param root - Validated GME-ACIS root directory.
+ * @param symbol - Validated C++ identifier to locate.
+ * @param run - Shell runner bound to the project root.
+ * @param maxMatches - Maximum number of source matches retained.
+ * @returns Canonical source matches and dependency impact.
+ */
 export async function locateGmeApi(
   root: string,
   symbol: string,

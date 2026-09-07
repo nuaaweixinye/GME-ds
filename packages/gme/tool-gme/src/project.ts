@@ -2,6 +2,7 @@ import { access } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 
+/** Aggregate recursive submodule state for a GME superproject. */
 export interface GmeSubmoduleSummary {
   total: number
   aligned: number
@@ -10,6 +11,7 @@ export interface GmeSubmoduleSummary {
   conflicted: number
 }
 
+/** Canonical project preflight report. */
 export interface GmeProjectStatus {
   root: string
   branch: string
@@ -19,6 +21,7 @@ export interface GmeProjectStatus {
   cmakeVersion: string
 }
 
+/** Shell command runner used by project inspection. */
 export type GmeCommandRunner = (command: string) => Promise<ShellRunResult>
 
 async function exists(path: string): Promise<boolean> {
@@ -36,7 +39,13 @@ async function isGmeRoot(path: string): Promise<boolean> {
     && await exists(join(path, 'include', 'gme'))
 }
 
-/** Resolve the nearest GME-ACIS root from explicit, configured, or session paths. */
+/**
+ * Resolve the nearest GME-ACIS root from explicit, configured, or session paths.
+ * @param explicitRoot - Optional root supplied by one tool call.
+ * @param configuredRoot - Optional root supplied by plugin configuration.
+ * @param sessionCwd - Optional calling session working directory.
+ * @returns The validated absolute GME-ACIS root.
+ */
 export async function resolveGmeRoot(
   explicitRoot: string | undefined,
   configuredRoot: string | undefined,
@@ -70,6 +79,11 @@ function parseBranch(status: string): string {
   return branch === '' || branch === undefined ? '(detached)' : branch
 }
 
+/**
+ * Parse recursive Git submodule status into aggregate classes.
+ * @param text - Output from `git submodule status --recursive`.
+ * @returns Counts for aligned, missing, divergent, and conflicted submodules.
+ */
 export function parseSubmodules(text: string): GmeSubmoduleSummary {
   const summary: GmeSubmoduleSummary = { total: 0, aligned: 0, missing: 0, divergent: 0, conflicted: 0 }
   for (const line of text.split(/\r?\n/)) {
@@ -85,7 +99,12 @@ export function parseSubmodules(text: string): GmeSubmoduleSummary {
   return summary
 }
 
-/** Inspect Git, submodule, and required tool state for a validated GME root. */
+/**
+ * Inspect Git, submodule, and required tool state for a validated GME root.
+ * @param root - Validated GME-ACIS root directory.
+ * @param run - Shell runner bound to the project root.
+ * @returns Canonical branch, worktree, submodule, Git, and CMake status.
+ */
 export async function inspectGmeProject(root: string, run: GmeCommandRunner): Promise<GmeProjectStatus> {
   const [gitStatusResult, submoduleResult, gitVersionResult, cmakeVersionResult] = await Promise.all([
     run('git status --porcelain=v1 --branch'),

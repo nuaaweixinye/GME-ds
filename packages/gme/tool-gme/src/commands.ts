@@ -20,10 +20,19 @@ const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_-]*$/
 const GTEST_FILTER = /^[A-Za-z0-9_.*?/:=-]+$/
 const RELATIVE_DIRECTORY = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/
 
+/**
+ * Validate an allowlisted command identifier.
+ * @param value - Candidate identifier.
+ * @param label - Argument name used in diagnostics.
+ */
 export function validateIdentifier(value: string, label: string): void {
   if (!IDENTIFIER.test(value)) throw new Error(`${label} must be an identifier containing only letters, digits, _ or -`)
 }
 
+/**
+ * Validate a project-relative build directory without parent traversal.
+ * @param value - Candidate build directory.
+ */
 export function validateBuildDirectory(value: string): void {
   const normalized = value.replace(/\\/g, '/')
   if (!RELATIVE_DIRECTORY.test(normalized) || normalized.split('/').includes('..')) {
@@ -31,6 +40,10 @@ export function validateBuildDirectory(value: string): void {
   }
 }
 
+/**
+ * Validate the supported GoogleTest filter character set.
+ * @param value - Candidate GoogleTest filter.
+ */
 export function validateGtestFilter(value: string): void {
   if (value.length === 0 || !GTEST_FILTER.test(value)) {
     throw new Error('filter contains unsupported GoogleTest filter characters')
@@ -42,7 +55,12 @@ function normalizedDirectory(value: string): string {
   return value.replace(/\\/g, '/')
 }
 
-/** Build one platform-appropriate configure/build command from validated values. */
+/**
+ * Build one platform-appropriate configure/build command from validated values.
+ * @param args - Build scope, paths, configuration, and target.
+ * @param platform - Host platform used to select command syntax and generator.
+ * @returns A validated shell command.
+ */
 export function buildGmeCommand(args: GmeBuildCommandArgs, platform: NodeJS.Platform): string {
   validateIdentifier(args.target, 'target')
   const buildDirectory = normalizedDirectory(args.buildDirectory)
@@ -64,7 +82,12 @@ export function buildGmeCommand(args: GmeBuildCommandArgs, platform: NodeJS.Plat
     : `${configure} && ${build}`
 }
 
-/** Build one platform-appropriate GoogleTest command from validated values. */
+/**
+ * Build one platform-appropriate GoogleTest command from validated values.
+ * @param args - Test executable path, configuration, filter, and repeat count.
+ * @param platform - Host platform used to select the test executable path.
+ * @returns A validated shell command.
+ */
 export function buildGtestCommand(args: GmeTestCommandArgs, platform: NodeJS.Platform): string {
   const buildDirectory = normalizedDirectory(args.buildDirectory)
   validateGtestFilter(args.filter)

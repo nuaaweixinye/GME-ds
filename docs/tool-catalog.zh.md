@@ -21,6 +21,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`、`ctx.userQuestions` | `tool/call`、`tool/result after a UI/provider answers the question` | - | ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。 |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`、`ctx.codeRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: ptc`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 PTC mode Agent Note）。在 `ptc` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
+| `@deepseek-ai/dsh-tool-gme` | `gme_build`、`gme_delivery_check`、`gme_locate_api`、`gme_project_status`、`gme_test` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`host filesystem and processes for build/test calls` | - | GME 工具先校验 GME-ACIS checkout 和受约束的领域参数，再通过已挂载的 shell executor 检查 Git、定位 API，或运行 CMake 与 GoogleTest。 |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费方（由 `@deepseek-ai/dsh-pwsh-local` 等 PowerShell 执行器为 `ctx.shell` 提供后端）；除沙箱接口外，它逐项对应 bash 工具调用。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具收集／停止；托管的 `DSH_*` 环境来自 `@deepseek-ai/dsh-shell-env`。每次调用都在新进程中运行，不使用持久 PTY 会话。路径采用原生 `C:\...` 形式，变量采用 `$env:NAME`。 |
@@ -151,6 +152,175 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 来源：[`packages/core/tools/src/ptc.ts`](../packages/core/tools/src/ptc.ts)
 
 在 `mode: ptc`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 PTC mode Agent Note）。在 `ptc` 下，它是注册表对协议格式的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。
+
+<a id="deepseek-aidsh-tool-gme"></a>
+
+## `@deepseek-ai/dsh-tool-gme`
+
+### `gme_build`
+
+配置并构建经过校验的 GME-ACIS 全模块或单个开发模块目标。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root."
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "all",
+        "module"
+      ]
+    },
+    "module": {
+      "type": "string",
+      "description": "Module name required for module scope, for example constructors."
+    },
+    "configuration": {
+      "type": "string",
+      "description": "Build configuration. Defaults to Debug.",
+      "enum": [
+        "Debug",
+        "Release",
+        "RelWithDebInfo"
+      ]
+    },
+    "target": {
+      "type": "string",
+      "description": "CMake target. Defaults to tests."
+    },
+    "build_directory": {
+      "type": "string",
+      "description": "Relative build directory. Defaults to build."
+    },
+    "configure": {
+      "type": "boolean",
+      "description": "Run CMake configure before build. Defaults to true."
+    }
+  },
+  "required": [
+    "scope"
+  ]
+}
+```
+
+来源：[`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+### `gme_delivery_check`
+
+交付前检查有变更的 GME 子模块，以及新增生产代码中对某个禁用 ACIS 符号的直接调用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root."
+    },
+    "forbidden_symbol": {
+      "type": "string",
+      "description": "Corresponding ACIS C++ symbol that production changes must not call."
+    }
+  },
+  "required": [
+    "forbidden_symbol"
+  ]
+}
+```
+
+来源：[`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+### `gme_locate_api`
+
+在当前 checkout 中定位 GME 或 ACIS C++ 符号，并报告声明、实现、测试、模块依赖和受影响的依赖方。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root."
+    },
+    "symbol": {
+      "type": "string",
+      "description": "C++ identifier to locate, for example gme_api_make_box."
+    }
+  },
+  "required": [
+    "symbol"
+  ]
+}
+```
+
+来源：[`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+### `gme_project_status`
+
+修改前检查 GME-ACIS 总装仓，报告分支、清洁状态、递归子模块状态、Git 和 CMake。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root. Defaults to configured root or session workspace."
+    }
+  }
+}
+```
+
+来源：[`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+### `gme_test`
+
+在已有 GME-ACIS 构建中运行明确的 GoogleTest filter。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Optional absolute GME-ACIS root."
+    },
+    "filter": {
+      "type": "string",
+      "description": "Explicit GoogleTest filter."
+    },
+    "configuration": {
+      "type": "string",
+      "description": "Build configuration. Defaults to Debug.",
+      "enum": [
+        "Debug",
+        "Release",
+        "RelWithDebInfo"
+      ]
+    },
+    "build_directory": {
+      "type": "string",
+      "description": "Relative build directory. Defaults to build."
+    },
+    "repeat": {
+      "type": "integer",
+      "description": "Repeat count from 1 to 100. Defaults to 1."
+    }
+  },
+  "required": [
+    "filter"
+  ]
+}
+```
+
+来源：[`packages/gme/tool-gme/src/index.ts`](../packages/gme/tool-gme/src/index.ts)
+
+GME 工具先校验 GME-ACIS checkout 和受约束的领域参数，再通过已挂载的 shell executor 检查 Git、定位 API，或运行 CMake 与 GoogleTest。
 
 <a id="deepseek-aidsh-plan-mode"></a>
 

@@ -1,15 +1,18 @@
 /** GME-ACIS project tools for DeepSeek Harness. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
+import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import { buildGmeCommand, buildGtestCommand, validateBuildDirectory, validateGtestFilter, validateIdentifier } from './commands.ts'
 import { locateGmeApi, validateCppSymbol, type GmeApiLocation } from './indexer.ts'
+import { changedSubmodules, inspectDeliveryDiff, type ChangedSubmodule, type ForbiddenCallFinding } from './delivery.ts'
 import { inspectGmeProject, resolveGmeRoot, type GmeProjectStatus } from './project.ts'
 
 export const name = 'tool-gme'
 export const inject = ['tools', 'shell', 'systemPrompt']
 
+/** GME tool plugin configuration. */
 export interface Config {
   /** Fixed GME-ACIS root. When omitted, tools resolve from the calling session cwd. */
   projectRoot?: string
@@ -78,6 +81,27 @@ function renderApiLocation(location: GmeApiLocation): string {
   return lines.join('\n')
 }
 
+interface GmeDeliveryReport {
+  root: string
+  forbiddenSymbol: string
+  changedSubmodules: ChangedSubmodule[]
+  forbiddenCalls: ForbiddenCallFinding[]
+}
+
+function renderDeliveryReport(report: GmeDeliveryReport): string {
+  const modules = report.changedSubmodules.length === 0
+    ? '(none)'
+    : report.changedSubmodules.map(module => `${module.path} (${module.status})`).join(', ')
+  const lines = [
+    `GME root: ${report.root}`,
+    `Changed submodules: ${modules}`,
+    `Forbidden symbol: ${report.forbiddenSymbol}`,
+    `Forbidden production calls: ${report.forbiddenCalls.length}`,
+  ]
+  for (const finding of report.forbiddenCalls) lines.push(`${finding.path}:${finding.line}\n  ${finding.text}`)
+  return lines.join('\n')
+}
+
 const COMMAND_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -142,6 +166,83 @@ export function apply(ctx: Context, config: Config = {}): void {
       return inspectGmeProject(root, command => run(root, command, exec.signal))
     },
     presentCall: () => ({ card: 'generic', title: 'Inspect GME project', kind: 'search' }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'gme_delivery_check',
+    description: 'Check changed GME submodules and added production lines for direct calls to one forbidden ACIS symbol before delivery.',
+    parameters: {
+      root: { type: 'string', description: 'Optional absolute GME-ACIS root.' },
+      forbidden_symbol: { type: 'string', required: true, description: 'Corresponding ACIS C++ symbol that production changes must not call.' },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          root: { type: 'string', required: true },
+          forbiddenSymbol: { type: 'string', required: true },
+          changedSubmodules: {
+            type: 'array', required: true,
+            items: {
+              type: 'object', additionalProperties: false,
+              properties: {
+                path: { type: 'string', required: true },
+                status: { type: 'string', required: true, enum: ['missing', 'divergent', 'conflicted', 'dirty'] },
+              },
+            },
+          },
+          forbiddenCalls: {
+            type: 'array', required: true,
+            items: {
+              type: 'object', additionalProperties: false,
+              properties: {
+                path: { type: 'string', required: true },
+                line: { type: 'integer', required: true },
+                text: { type: 'string', required: true },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: renderDeliveryReport(value) }],
+      presentationMeta: (_args, value) => ({
+        changedSubmoduleCount: value.changedSubmodules.length,
+        forbiddenCallCount: value.forbiddenCalls.length,
+      }),
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      validateCppSymbol(args.forbidden_symbol)
+      const root = await rootFor(args.root, exec.agent?.session.header.cwd)
+      const [statusResult, submoduleResult, diffResult] = await Promise.all([
+        run(root, 'git status --porcelain=v1', exec.signal),
+        run(root, 'git submodule status --recursive', exec.signal),
+        run(root, 'git diff --unified=0 --no-ext-diff HEAD', exec.signal),
+      ])
+      if (statusResult.exitCode !== 0) throw new Error(`git status failed: ${statusResult.stderr.text.trim()}`)
+      if (submoduleResult.exitCode !== 0) throw new Error(`git submodule status failed: ${submoduleResult.stderr.text.trim()}`)
+      if (diffResult.exitCode !== 0) throw new Error(`git diff failed: ${diffResult.stderr.text.trim()}`)
+      const modules = changedSubmodules(submoduleResult.stdout.text, statusResult.stdout.text)
+      const forbiddenCalls = inspectDeliveryDiff(diffResult.stdout.text, args.forbidden_symbol)
+      for (const module of modules) {
+        if (module.status === 'missing' || !/^[A-Za-z0-9._/-]+$/.test(module.path)) continue
+        const baseResult = await run(root, `git rev-parse HEAD:${module.path}`, exec.signal)
+        const base = baseResult.stdout.text.trim()
+        if (baseResult.exitCode !== 0 || !/^[0-9a-f]{40,64}$/i.test(base)) {
+          throw new Error(`Cannot resolve recorded commit for submodule ${module.path}: ${baseResult.stderr.text.trim()}`)
+        }
+        const moduleResult = await run(join(root, ...module.path.split('/')), `git diff --unified=0 --no-ext-diff ${base} --`, exec.signal)
+        if (moduleResult.exitCode !== 0) throw new Error(`git diff failed in ${module.path}: ${moduleResult.stderr.text.trim()}`)
+        forbiddenCalls.push(...inspectDeliveryDiff(moduleResult.stdout.text, args.forbidden_symbol, module.path))
+      }
+      return {
+        root,
+        forbiddenSymbol: args.forbidden_symbol,
+        changedSubmodules: modules,
+        forbiddenCalls,
+      }
+    },
+    presentCall: args => ({ card: 'generic', title: `Check GME delivery: ${args.forbidden_symbol}`, kind: 'search' }),
   }))
 
   ctx.tools.register(defineTool({

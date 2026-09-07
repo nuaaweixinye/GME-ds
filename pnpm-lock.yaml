@@ -5363,6 +5363,25 @@ importers:
         specifier: workspace:^
         version: link:../../core/tools
 
+  packages/gme/profile:
+    dependencies:
+      '@deepseek-ai/dsh-skill-filesystem':
+        specifier: workspace:^
+        version: link:../../skill/skill-filesystem
+      '@deepseek-ai/dsh-tool-gme':
+        specifier: workspace:^
+        version: link:../tool-gme
+      '@deepseek-ai/dsh-tool-weknora':
+        specifier: workspace:^
+        version: link:../../web/tool-weknora
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-app-boot':
+        specifier: workspace:^
+        version: link:../../boot/app-boot
+
   packages/gme/tool-gme:
     dependencies:
       '@deepseek-ai/schemastery':

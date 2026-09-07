@@ -8,6 +8,7 @@ import { ShellExecutor, type ShellExecRequest, type ShellExecSpec, type ShellRun
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { buildGmeCommand, buildGtestCommand } from '../src/commands.ts'
+import { parseModuleDependencies } from '../src/indexer.ts'
 import * as ToolGme from '../src/index.ts'
 
 const signal = new AbortController().signal
@@ -203,6 +204,79 @@ describe('GME P0 tools', () => {
 
     expect(build.isError).toBe(true)
     expect(test.isError).toBe(true)
+    expect(runtime.shell.requests).toHaveLength(0)
+  })
+})
+
+describe('GME P1 API index', () => {
+  const roots: string[] = []
+  const disposers: Array<() => Promise<void>> = []
+
+  afterEach(async () => {
+    while (disposers.length > 0) await disposers.pop()?.()
+    while (roots.length > 0) await rm(roots.pop()!, { recursive: true, force: true })
+  })
+
+  it('computes direct, transitive, and reverse module dependencies', () => {
+    const graph = parseModuleDependencies(`
+      set(BASE_DEPS)
+      set(LAWS_DEPS "base")
+      set(KERNEL_DEPS "laws")
+      set(CONSTRUCTORS_DEPS "kernel")
+      set(QUERY_DEPS "constructors" "base")
+    `)
+
+    expect(graph.direct('query')).toEqual(['base', 'constructors'])
+    expect(graph.transitive('query')).toEqual(['base', 'constructors', 'kernel', 'laws'])
+    expect(graph.dependants('kernel')).toEqual(['constructors', 'query'])
+  })
+
+  it('locates and classifies current-checkout API matches with module impact', async () => {
+    const root = await fixtureRoot()
+    roots.push(root)
+    await writeFile(join(root, 'CMakeLists.txt'), `
+      project(GME-ACIS)
+      set(BASE_DEPS)
+      set(KERNEL_DEPS "base")
+      set(CONSTRUCTORS_DEPS "kernel")
+      set(QUERY_DEPS "constructors")
+    `)
+    const runtime = await mount(root)
+    disposers.push(runtime.dispose)
+    runtime.shell.handler = (spec) => {
+      if (spec.command.startsWith('rg --fixed-strings')) {
+        return shellResult(
+          'include/gme/constructors/cstrapi.hxx:41:DECL_CSTR outcome gme_api_make_box();\n'
+          + 'module/constructors/src/cstrapi.cpp:88:outcome gme_api_make_box() {\n'
+          + 'tests/gme/src/constructors/cstrapi_test.cpp:19:TEST(Api, gme_api_make_box) {\n',
+        )
+      }
+      return shellResult('', { exitCode: 1 })
+    }
+
+    const result = await runtime.call('gme_locate_api', { symbol: 'gme_api_make_box' })
+
+    expect(result.isError).toBe(false)
+    const text = firstText(result)
+    expect(text).toContain('Module: constructors')
+    expect(text).toContain('Direct dependencies: kernel')
+    expect(text).toContain('Transitive dependencies: base, kernel')
+    expect(text).toContain('Affected dependants: query')
+    expect(text).toContain('Declaration: include/gme/constructors/cstrapi.hxx:41')
+    expect(text).toContain('Implementation: module/constructors/src/cstrapi.cpp:88')
+    expect(text).toContain('Test: tests/gme/src/constructors/cstrapi_test.cpp:19')
+  })
+
+  it('rejects an invalid C++ identifier before search execution', async () => {
+    const root = await fixtureRoot()
+    roots.push(root)
+    const runtime = await mount(root)
+    disposers.push(runtime.dispose)
+
+    const result = await runtime.call('gme_locate_api', { symbol: 'gme_api_make_box; Remove-Item' })
+
+    expect(result.isError).toBe(true)
+    expect(firstText(result)).toContain('symbol must be a C++ identifier')
     expect(runtime.shell.requests).toHaveLength(0)
   })
 })

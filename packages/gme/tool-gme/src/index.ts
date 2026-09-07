@@ -4,6 +4,7 @@ import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import { buildGmeCommand, buildGtestCommand, validateBuildDirectory, validateGtestFilter, validateIdentifier } from './commands.ts'
+import { locateGmeApi, validateCppSymbol, type GmeApiLocation } from './indexer.ts'
 import { inspectGmeProject, resolveGmeRoot, type GmeProjectStatus } from './project.ts'
 
 export const name = 'tool-gme'
@@ -56,6 +57,25 @@ function renderStatus(status: GmeProjectStatus): string {
     `Git: ${status.gitVersion}`,
     `CMake: ${status.cmakeVersion}`,
   ].join('\n')
+}
+
+function renderApiLocation(location: GmeApiLocation): string {
+  const list = (values: string[]) => values.length === 0 ? '(none)' : values.join(', ')
+  const lines = [
+    `Symbol: ${location.symbol}`,
+    `Module: ${location.module ?? '(unknown)'}`,
+    `Direct dependencies: ${list(location.directDependencies)}`,
+    `Transitive dependencies: ${list(location.transitiveDependencies)}`,
+    `Affected dependants: ${list(location.affectedDependants)}`,
+    '',
+  ]
+  if (location.matches.length === 0) lines.push('No current-checkout matches found.')
+  for (const match of location.matches) {
+    const label = match.kind[0]?.toUpperCase() + match.kind.slice(1)
+    lines.push(`${label}: ${match.path}:${match.line}\n  ${match.text}`)
+  }
+  if (location.truncated) lines.push('', 'Results truncated; narrow the symbol or inspect with rg.')
+  return lines.join('\n')
 }
 
 const COMMAND_OUTPUT_SCHEMA = {
@@ -122,6 +142,49 @@ export function apply(ctx: Context, config: Config = {}): void {
       return inspectGmeProject(root, command => run(root, command, exec.signal))
     },
     presentCall: () => ({ card: 'generic', title: 'Inspect GME project', kind: 'search' }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'gme_locate_api',
+    description: 'Locate a GME or ACIS C++ symbol in the current checkout and report declarations, implementations, tests, module dependencies, and affected dependants.',
+    parameters: {
+      root: { type: 'string', description: 'Optional absolute GME-ACIS root.' },
+      symbol: { type: 'string', required: true, description: 'C++ identifier to locate, for example gme_api_make_box.' },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          symbol: { type: 'string', required: true },
+          module: { type: 'string' },
+          directDependencies: { type: 'array', required: true, items: { type: 'string' } },
+          transitiveDependencies: { type: 'array', required: true, items: { type: 'string' } },
+          affectedDependants: { type: 'array', required: true, items: { type: 'string' } },
+          matches: {
+            type: 'array', required: true,
+            items: {
+              type: 'object', additionalProperties: false,
+              properties: {
+                path: { type: 'string', required: true },
+                line: { type: 'integer', required: true },
+                text: { type: 'string', required: true },
+                kind: { type: 'string', required: true, enum: ['declaration', 'implementation', 'test'] },
+              },
+            },
+          },
+          truncated: { type: 'boolean', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: renderApiLocation(value) }],
+      presentationMeta: (_args, value) => ({ resultCount: value.matches.length, truncated: value.truncated }),
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      validateCppSymbol(args.symbol)
+      const root = await rootFor(args.root, exec.agent?.session.header.cwd)
+      return locateGmeApi(root, args.symbol, command => run(root, command, exec.signal))
+    },
+    presentCall: args => ({ card: 'generic', title: args.symbol, kind: 'search', rawInput: args.symbol }),
   }))
 
   ctx.tools.register(defineTool({

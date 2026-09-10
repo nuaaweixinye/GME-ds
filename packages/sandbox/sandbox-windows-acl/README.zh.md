@@ -73,7 +73,7 @@ rmSync(tempDir, { recursive: true, force: true })
 
 ### 失败与恢复
 
-`init()` 在任何 Win32 失败时抛出——子进程绝不会不受限制地 spawn。执行命令前失败的 runner 会向 stderr 打印 `windows-acl-run: <detail>` 并以 127 退出，seam 的 runner 失败规则将其归类为损坏的沙箱，而非拒绝。清理按设计尽力而为：`dispose()` 会尝试全部临时撤销并把失败聚合为 `AggregateError`。
+`init()` 在任何 Win32 失败时抛出——子进程绝不会不受限制地 spawn。执行命令前失败的 runner 会向 stderr 打印 `windows-acl-run: <detail>` 并以 127 退出，seam 的 runner 失败规则将其归类为损坏的沙箱，而非拒绝。目录校验会区分路径缺失与 `EACCES`/`EPERM`，因此无法访问的临时目录不会再被误报为不存在。清理按设计尽力而为：`dispose()` 会尝试全部临时撤销并把失败聚合为 `AggregateError`。
 
 -----
 
@@ -105,7 +105,7 @@ Authenticated Users 在两种列表中都不存在——WMI 命名空间安全�
 node runner.js --workspace <dir> --temp <dir> --mode <read-only|workspace-write> [--write-sid <S-1-4-…> --temp-write-sid <S-1-4-…>] -- <argv...>
 ```
 
-seam 先把确定性工作区 SID 的 ACE 常驻物化（每个工作区每服务器生命周期一次——复用缓存），再为每个活跃的会话/工作区对创建随机私有临时目录和不同的可回收 SID，把两种身份作为必须成对出现的 `--write-sid`/`--temp-write-sid` 传入；runner 对照各自所属路径验证二者，既不授权也不撤销（`manageDacls: false`）。fork 获得不同的临时能力；即使恢复的是同一会话，新的提供方也会给出新的路径和 SID，因此崩溃残留只是失效垃圾。如果不带这一对标志，`--temp` 指定的是根目录：无 agent（智能体）/独立的 workspace-write runner 会创建随机私有子目录，自行管理其临时 SID，重写 TMP/TEMP，并在退出时移除该子目录。重启后重新授权常驻工作区 ACE 是幂等的：`grantWrite` 读取当前 DACL，当完全相同的 ACE 已存在时跳过重新传播。工作区若等于或包含临时根目录，会在任何授权前被拒绝。
+seam 先把确定性工作区 SID 的 ACE 常驻物化（每个工作区每服务器生命周期一次——复用缓存），再为每个活跃的会话/工作区对创建随机私有临时目录和不同的可回收 SID，把两种身份作为必须成对出现的 `--write-sid`/`--temp-write-sid` 传入；runner 对照各自所属路径验证二者，既不授权也不撤销（`manageDacls: false`）。临时目录授权会在写入 capability ACE 的同时，为目录 owner 写入显式完全访问 ACE。即使目录创建在加固的共享临时根下、服务端原本仅通过 `CREATOR OWNER` 继承获得访问权，服务端仍能检查、撤销和删除该目录。fork 获得不同的临时能力；即使恢复的是同一会话，新的提供方也会给出新的路径和 SID，因此崩溃残留只是失效垃圾。如果不带这一对标志，`--temp` 指定的是根目录：无 agent（智能体）/独立的 workspace-write runner 会创建随机私有子目录，自行管理其临时 SID，重写 TMP/TEMP，并在退出时移除该子目录。重启后重新授权常驻工作区 ACE 是幂等的：`grantWrite` 读取当前 DACL，当完全相同的 ACE 已存在时跳过重新传播。工作区若等于或包含临时根目录，会在任何授权前被拒绝。
 
 ### 已验证边界
 

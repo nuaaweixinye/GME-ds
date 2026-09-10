@@ -33,10 +33,11 @@ function grantThenFailApi(): { api: Win32Bindings; failReads: () => void } {
     unlockFileEx: vi.fn(() => 1),
     closeHandle: vi.fn(() => 1),
     getNamedSecurityInfoW: vi.fn((
-      _path: unknown, _type: unknown, _info: unknown, _owner: unknown, _group: unknown,
+      _path: unknown, _type: unknown, _info: unknown, owner: NativePtr, _group: unknown,
       dacl: NativePtr, _sacl: unknown, descriptor: NativePtr,
     ) => {
       if (state.failReads) return 2 // ERROR_FILE_NOT_FOUND — the revoke's read fails
+      koffi.encode(owner, PVOID, 43n)
       koffi.encode(dacl, PVOID, 0n) // no explicit DACL: the merge builds one
       koffi.encode(descriptor, PVOID, 0n)
       return 0

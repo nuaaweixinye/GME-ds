@@ -44,9 +44,10 @@
  * @module @deepseek-ai/dsh-sandbox-windows-acl/runner
  */
 
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { directoryValidationError } from './directory-validation.ts'
 import { win32 } from './ffi.ts'
 import { AclSandbox, assertTempRootOutsideWorkspace } from './index.ts'
 import { tempWriteSid, workspaceWriteSid } from './workspace-sid.ts'
@@ -107,9 +108,8 @@ function parseArgs(raw: string[]): ParsedArgs {
 }
 
 function requireDirectory(label: string, path: string): void {
-  if (!existsSync(path) || !statSync(path).isDirectory()) {
-    fail(`${label} is not an existing directory: ${path}`)
-  }
+  const detail = directoryValidationError(label, path)
+  if (detail !== undefined) fail(detail)
 }
 
 async function main(): Promise<number> {

@@ -11,7 +11,7 @@
  * @module @deepseek-ai/dsh-sandbox-windows-acl/grant
  */
 
-import { grantWrite, revokeWrite } from './acl.ts'
+import { grantWrite, grantWritePreservingOwner, revokeWrite } from './acl.ts'
 import { allocPtrSlot, decodePtr, isNullPtr, throwLastError, win32Sync } from './ffi.ts'
 import type { NativePtr, Win32Bindings } from './ffi.ts'
 
@@ -73,7 +73,8 @@ export class AclWriteGrant {
    */
   add(path: string, standing = false): void {
     ;(standing ? this.standingPaths : this.revocablePaths).push(path)
-    grantWrite(this.api, path, this.sidPtr)
+    if (standing) grantWrite(this.api, path, this.sidPtr)
+    else grantWritePreservingOwner(this.api, path, this.sidPtr)
   }
 
   /** Every directory currently carrying the grant, in grant order. */

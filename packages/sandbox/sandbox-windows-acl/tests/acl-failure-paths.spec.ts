@@ -13,7 +13,7 @@ import { Win32Error } from '@deepseek-ai/dsh-win32-process'
 import { describe, expect, it, vi } from 'vitest'
 import koffi from 'koffi'
 
-import { grantWrite, revokeWrite, withPathLock } from '../src/acl.ts'
+import { grantWrite, grantWritePreservingOwner, revokeWrite, withPathLock } from '../src/acl.ts'
 import { allocBytes, ptrAddress } from '../src/ffi.ts'
 import type { NativePtr, Win32Bindings } from '../src/ffi.ts'
 import * as abi from '../src/win32-abi.ts'
@@ -402,6 +402,37 @@ describe('the exact-ACE skip and DACL-walk defenses', () => {
     })
     grantWrite(api, 'C:\\granted', sid)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves temp-directory owner access in the same DACL update as the capability grant', () => {
+    const capabilitySid = craftSid(1, 0)
+    const ownerSid = craftSid(1, 1)
+    const setEntriesInAclW = vi.fn((count: number, entries: Buffer, _old: unknown, newAcl: NativePtr) => {
+      expect(count).toBe(2)
+      expect(entries.readUInt32LE(0)).toBe(abi.FILE_ALL_ACCESS)
+      expect(entries.readBigUInt64LE(40)).toBe(ptrAddress(ownerSid))
+      expect(entries.readUInt32LE(abi.EXPLICIT_ACCESS_W_SIZE)).toBe(abi.GRANT_MASK)
+      expect(entries.readBigUInt64LE(abi.EXPLICIT_ACCESS_W_SIZE + 40)).toBe(ptrAddress(capabilitySid))
+      koffi.encode(newAcl, PVOID, 9n)
+      return 0
+    })
+    const api = aclApi({
+      getNamedSecurityInfoW: vi.fn((
+        _path: unknown, _type: unknown, info: number, owner: NativePtr, _group: unknown,
+        dacl: NativePtr, _sacl: unknown, descriptor: NativePtr,
+      ) => {
+        expect(info).toBe(abi.OWNER_SECURITY_INFORMATION | abi.DACL_SECURITY_INFORMATION)
+        koffi.encode(owner, PVOID, ptrAddress(ownerSid))
+        koffi.encode(dacl, PVOID, 0n)
+        koffi.encode(descriptor, PVOID, 6n)
+        return 0
+      }),
+      setEntriesInAclW,
+    })
+
+    grantWritePreservingOwner(api, 'C:\\temp', capabilitySid)
+
+    expect(setEntriesInAclW).toHaveBeenCalledTimes(1)
   })
 })
 

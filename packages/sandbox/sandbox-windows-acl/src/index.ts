@@ -44,7 +44,7 @@ import { existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { Win32Error } from '@deepseek-ai/dsh-win32-process'
 
-import { grantWrite, revokeWrite } from './acl.ts'
+import { grantWrite, grantWritePreservingOwner, revokeWrite } from './acl.ts'
 import { allocPtrSlot, decodePtr, isNullPtr, throwLastError, win32 } from './ffi.ts'
 import type { NativePtr, Win32Bindings } from './ffi.ts'
 import { assertPrivateTempDisjoint } from './path-boundary.ts'
@@ -264,7 +264,7 @@ export class AclSandbox {
             // apply (a LocalFree failure), and the fail-closed catch must still
             // revoke that path (revoking an ungranted path is a no-op merge).
             this.grantedPaths.push({ path: tempDir, sidPtr: this.tempWriteSidPtr })
-            grantWrite(api, tempDir, this.tempWriteSidPtr)
+            grantWritePreservingOwner(api, tempDir, this.tempWriteSidPtr)
           }
         }
       }

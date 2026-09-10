@@ -85,9 +85,10 @@ function happyStubs(): HappyStubs {
   })
   const createFileW = vi.fn(() => fresh())
   const getNamedSecurityInfoW = vi.fn((
-    _path: unknown, _type: unknown, _info: unknown, _owner: unknown, _group: unknown,
+    _path: unknown, _type: unknown, _info: unknown, owner: NativePtr, _group: unknown,
     dacl: NativePtr, _sacl: unknown, descriptor: NativePtr,
   ) => {
+    koffi.encode(owner, PVOID, 43n)
     koffi.encode(dacl, PVOID, 0n)
     koffi.encode(descriptor, PVOID, 0n)
     return 0
@@ -337,10 +338,11 @@ describe('AclSandbox init', () => {
     })
     localFree.mockImplementation(() => (inCleanup ? 1n : 0n))
     getNamedSecurityInfoW.mockImplementation((
-      _path: unknown, _type: unknown, _info: unknown, _owner: unknown, _group: unknown,
+      _path: unknown, _type: unknown, _info: unknown, owner: NativePtr, _group: unknown,
       dacl: NativePtr, _sacl: unknown, descriptor: NativePtr,
     ) => {
       if (inCleanup) return 2 // the cleanup's revocation read fails too
+      koffi.encode(owner, PVOID, 43n)
       koffi.encode(dacl, PVOID, 0n)
       koffi.encode(descriptor, PVOID, 0n)
       return 0

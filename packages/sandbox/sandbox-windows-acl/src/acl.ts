@@ -119,18 +119,22 @@ export function withPathLock<T>(api: Win32Bindings, path: string, action: () => 
  * @param path - the directory whose DACL is read.
  * @returns the current explicit DACL (null when the directory carries none) and its owning descriptor.
  */
-function readCurrentDacl(api: Win32Bindings, path: string): { oldAcl: NativePtr | null; descriptor: NativePtr | null } {
+function readCurrentDacl(
+  api: Win32Bindings,
+  path: string,
+  includeOwner = false,
+): { oldAcl: NativePtr | null; descriptor: NativePtr | null; owner: NativePtr | null } {
   const ownerSlot = allocPtrSlot()
   const groupSlot = allocPtrSlot()
   const daclSlot = allocPtrSlot()
   const saclSlot = allocPtrSlot()
   const descriptorSlot = allocPtrSlot()
   const readResult = api.getNamedSecurityInfoW(
-    path, abi.SE_FILE_OBJECT, abi.DACL_SECURITY_INFORMATION,
+    path, abi.SE_FILE_OBJECT, abi.DACL_SECURITY_INFORMATION | (includeOwner ? abi.OWNER_SECURITY_INFORMATION : 0),
     ownerSlot, groupSlot, daclSlot, saclSlot, descriptorSlot,
   )
   if (readResult !== abi.ERROR_SUCCESS) throwWin32(api, 'GetNamedSecurityInfoW', readResult, path)
-  return { oldAcl: decodePtr(daclSlot), descriptor: decodePtr(descriptorSlot) }
+  return { oldAcl: decodePtr(daclSlot), descriptor: decodePtr(descriptorSlot), owner: decodePtr(ownerSlot) }
 }
 
 /**
@@ -152,9 +156,10 @@ function mergeAndApply(
   oldAcl: NativePtr | null,
   descriptor: NativePtr | null,
   label: string,
+  entryCount = 1,
 ): void {
   const newAclSlot = allocPtrSlot()
-  const mergeResult = api.setEntriesInAclW(1, entry, oldAcl, newAclSlot)
+  const mergeResult = api.setEntriesInAclW(entryCount, entry, oldAcl, newAclSlot)
   if (mergeResult !== abi.ERROR_SUCCESS) {
     if (descriptor !== null) api.localFree(descriptor) // frees the ACL block too
     throwWin32(api, 'SetEntriesInAclW', mergeResult, `${label}(${path})`)
@@ -240,6 +245,28 @@ export function grantWrite(api: Win32Bindings, path: string, sidPtr: NativePtr):
       return
     }
     mergeAndApply(api, path, buildExplicitAccess(sidPtr, abi.GRANT_ACCESS, abi.GRANT_MASK), oldAcl, descriptor, 'grantWrite')
+  })
+}
+
+/**
+ * Grant a temporary-directory capability while materializing an explicit
+ * owner ACE in the same DACL update. Some hardened shared temp roots grant the
+ * creator access only through an inherited CREATOR OWNER ACE; rewriting that
+ * child DACL can otherwise leave the server process unable to inspect or
+ * remove its own temp directory.
+ */
+export function grantWritePreservingOwner(api: Win32Bindings, path: string, sidPtr: NativePtr): void {
+  withPathLock(api, path, () => {
+    const { oldAcl, descriptor, owner } = readCurrentDacl(api, path, true)
+    if (owner === null) {
+      if (descriptor !== null) api.localFree(descriptor)
+      throw new Error(`GetNamedSecurityInfoW returned a null owner SID for ${path}`)
+    }
+    const entries = Buffer.concat([
+      buildExplicitAccess(owner, abi.GRANT_ACCESS, abi.FILE_ALL_ACCESS),
+      buildExplicitAccess(sidPtr, abi.GRANT_ACCESS, abi.GRANT_MASK),
+    ])
+    mergeAndApply(api, path, entries, oldAcl, descriptor, 'grantWritePreservingOwner', 2)
   })
 }
 

@@ -42,6 +42,8 @@ export const TokenGroups = 2
 export const TokenDefaultDacl = 6
 /** SECURITY_INFORMATION flag selecting the DACL. */
 export const DACL_SECURITY_INFORMATION = 0x00000004
+/** SECURITY_INFORMATION flag selecting the object's owner SID. */
+export const OWNER_SECURITY_INFORMATION = 0x00000001
 /** SE_OBJECT_TYPE value for filesystem objects. */
 export const SE_FILE_OBJECT = 1
 /** TRUSTEE_TYPE value used when trustee classification is unknown. */

@@ -35,14 +35,14 @@ $env:WEKNORA_API_KEY = '<managed-secret>'
 pnpm dsh web
 ```
 
-上面展示的项目与 skill 环境变量是可选项，因为这个私有 profile 已经默认使用对应的本地路径。可以用逗号分隔的 `GME_WEKNORA_KB_IDS` 覆盖部署知识库。`WEKNORA_API_KEY` 只能放在进程环境或 Harness credentials 中，不能写进 patch。
+上面展示的项目与 skill 环境变量是可选项，因为这个私有 profile 已经默认使用对应的本地路径。该 profile 默认让新会话使用 `danger-full-access`，以支持 GME 所需的 Git for Windows、CMake 和 MSBuild 子进程流程；只应对可信 checkout 使用。可以用逗号分隔的 `GME_WEKNORA_KB_IDS` 覆盖部署知识库。`WEKNORA_API_KEY` 只能放在进程环境或 Harness credentials 中，不能写进 patch。
 
 -----
 
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
-[`cordis.patch.yml`](cordis.patch.yml) 覆盖 base 的 `skill-filesystem` 配置，并插入 `@deepseek-ai/dsh-tool-gme` 与 `@deepseek-ai/dsh-tool-weknora`。[`src/index.ts`](src/index.ts) 是空模块入口，因为 profile composition 才是本包的运行时行为。
+[`cordis.patch.yml`](cordis.patch.yml) 覆盖 base 的 `skill-filesystem` 配置，选择无需审批的完全访问执行，并插入 `@deepseek-ai/dsh-tool-gme` 与 `@deepseek-ai/dsh-tool-weknora`。[`src/index.ts`](src/index.ts) 是空模块入口，因为 profile composition 才是本包的运行时行为。
 
 本包不发布单独的运行时不变量配套文档，因为它只承载静态 profile patch。
 

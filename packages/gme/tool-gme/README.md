@@ -25,7 +25,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount it in a composition containing `tools`, `shell`, and `systemPrompt`:
+Mount it in a composition containing `tools`, `shell`, and `systemPrompt`. A confining shell must also expose `sandboxPolicy`; GME commands resolve the calling session's current mode and pass it to every shell request:
 
 ```yaml
 - name: '@deepseek-ai/dsh-tool-gme'

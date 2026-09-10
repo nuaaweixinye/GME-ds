@@ -35,14 +35,14 @@ $env:WEKNORA_API_KEY = '<managed-secret>'
 pnpm dsh web
 ```
 
-The project and skill variables shown above are optional because this private profile already defaults to those local paths. Comma-separated `GME_WEKNORA_KB_IDS` overrides the deployed knowledge bases. Keep `WEKNORA_API_KEY` in the process environment or Harness credentials, never in the patch.
+The project and skill variables shown above are optional because this private profile already defaults to those local paths. The profile defaults new sessions to `danger-full-access`, which is required by the Git for Windows, CMake, and MSBuild child-process workflows used by GME; use it only with trusted checkouts. Comma-separated `GME_WEKNORA_KB_IDS` overrides the deployed knowledge bases. Keep `WEKNORA_API_KEY` in the process environment or Harness credentials, never in the patch.
 
 -----
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
-[`cordis.patch.yml`](cordis.patch.yml) replaces the base `skill-filesystem` configuration and inserts `@deepseek-ai/dsh-tool-gme` plus `@deepseek-ai/dsh-tool-weknora`. [`src/index.ts`](src/index.ts) is an empty module entry because profile composition is the package's runtime behavior.
+[`cordis.patch.yml`](cordis.patch.yml) replaces the base `skill-filesystem` configuration, selects full-access execution with no approval prompts, and inserts `@deepseek-ai/dsh-tool-gme` plus `@deepseek-ai/dsh-tool-weknora`. [`src/index.ts`](src/index.ts) is an empty module entry because profile composition is the package's runtime behavior.
 
 No runtime invariant companion is published; this package carries only a static profile patch.
 

@@ -2,7 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { join } from 'node:path'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
+import { defineTool, type ToolExecution } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import { buildGmeCommand, buildGtestCommand, validateBuildDirectory, validateGtestFilter, validateIdentifier } from './commands.ts'
 import { locateGmeApi, validateCppSymbol, type GmeApiLocation } from './indexer.ts'
@@ -74,7 +75,7 @@ function renderApiLocation(location: GmeApiLocation): string {
   ]
   if (location.matches.length === 0) lines.push('No current-checkout matches found.')
   for (const match of location.matches) {
-    const label = match.kind[0]?.toUpperCase() + match.kind.slice(1)
+    const label = match.kind.charAt(0).toUpperCase() + match.kind.slice(1)
     lines.push(`${label}: ${match.path}:${match.line}\n  ${match.text}`)
   }
   if (location.truncated) lines.push('', 'Results truncated; narrow the symbol or inspect with rg.')
@@ -117,14 +118,23 @@ const COMMAND_OUTPUT_SCHEMA = {
 
 export function apply(ctx: Context, config: Config = {}): void {
   const timeoutMs = config.timeoutMs ?? 600_000
+  const sandboxPolicy: SandboxPolicyService | undefined = ctx.shell.sandboxMode === undefined
+    ? undefined
+    : ctx.get('sandboxPolicy')
+  if (ctx.shell.sandboxMode !== undefined && sandboxPolicy === undefined) {
+    throw new Error('tool-gme: the mounted shell executor confines but ctx.sandboxPolicy is missing')
+  }
   const rootFor = (root: string | undefined, sessionCwd: string | undefined) =>
     resolveGmeRoot(root, config.projectRoot, sessionCwd)
-  const run = (root: string, command: string, signal: AbortSignal) => ctx.shell.run(ctx.shell.resolve({
+  const run = (root: string, command: string, exec: ToolExecution) => ctx.shell.run(ctx.shell.resolve({
     command,
     workdir: root,
     timeoutMs,
     stdoutMaxBytes: 256_000,
-    signal,
+    signal: exec.signal,
+    ...sandboxPolicy === undefined ? {} : {
+      sandboxPolicy: sandboxPolicy.resolve(exec.agent === undefined ? {} : { session: exec.agent.session }),
+    },
   }))
 
   ctx.systemPrompt.section({
@@ -163,7 +173,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const root = await rootFor(args.root, exec.agent?.session.header.cwd)
-      return inspectGmeProject(root, command => run(root, command, exec.signal))
+      return inspectGmeProject(root, command => run(root, command, exec))
     },
     presentCall: () => ({ card: 'generic', title: 'Inspect GME project', kind: 'search' }),
   }))
@@ -215,9 +225,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       validateCppSymbol(args.forbidden_symbol)
       const root = await rootFor(args.root, exec.agent?.session.header.cwd)
       const [statusResult, submoduleResult, diffResult] = await Promise.all([
-        run(root, 'git status --porcelain=v1', exec.signal),
-        run(root, 'git submodule status --recursive', exec.signal),
-        run(root, 'git diff --unified=0 --no-ext-diff HEAD', exec.signal),
+        run(root, 'git status --porcelain=v1', exec),
+        run(root, 'git submodule status --recursive', exec),
+        run(root, 'git diff --unified=0 --no-ext-diff HEAD', exec),
       ])
       if (statusResult.exitCode !== 0) throw new Error(`git status failed: ${statusResult.stderr.text.trim()}`)
       if (submoduleResult.exitCode !== 0) throw new Error(`git submodule status failed: ${submoduleResult.stderr.text.trim()}`)
@@ -226,12 +236,12 @@ export function apply(ctx: Context, config: Config = {}): void {
       const forbiddenCalls = inspectDeliveryDiff(diffResult.stdout.text, args.forbidden_symbol)
       for (const module of modules) {
         if (module.status === 'missing' || !/^[A-Za-z0-9._/-]+$/.test(module.path)) continue
-        const baseResult = await run(root, `git rev-parse HEAD:${module.path}`, exec.signal)
+        const baseResult = await run(root, `git rev-parse HEAD:${module.path}`, exec)
         const base = baseResult.stdout.text.trim()
         if (baseResult.exitCode !== 0 || !/^[0-9a-f]{40,64}$/i.test(base)) {
           throw new Error(`Cannot resolve recorded commit for submodule ${module.path}: ${baseResult.stderr.text.trim()}`)
         }
-        const moduleResult = await run(join(root, ...module.path.split('/')), `git diff --unified=0 --no-ext-diff ${base} --`, exec.signal)
+        const moduleResult = await run(join(root, ...module.path.split('/')), `git diff --unified=0 --no-ext-diff ${base} --`, exec)
         if (moduleResult.exitCode !== 0) throw new Error(`git diff failed in ${module.path}: ${moduleResult.stderr.text.trim()}`)
         forbiddenCalls.push(...inspectDeliveryDiff(moduleResult.stdout.text, args.forbidden_symbol, module.path))
       }
@@ -283,7 +293,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     async execute(args, exec) {
       validateCppSymbol(args.symbol)
       const root = await rootFor(args.root, exec.agent?.session.header.cwd)
-      return locateGmeApi(root, args.symbol, command => run(root, command, exec.signal))
+      return locateGmeApi(root, args.symbol, command => run(root, command, exec))
     },
     presentCall: args => ({ card: 'generic', title: args.symbol, kind: 'search', rawInput: args.symbol }),
   }))
@@ -319,7 +329,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         scope: args.scope,
         ...args.module !== undefined ? { module: args.module } : {},
       }, process.platform)
-      return commandOutput(command, root, await run(root, command, exec.signal))
+      return commandOutput(command, root, await run(root, command, exec))
     },
     presentCall: args => ({
       card: 'terminal',
@@ -350,7 +360,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         filter: args.filter,
         repeat: args.repeat ?? 1,
       }, process.platform)
-      return commandOutput(command, root, await run(root, command, exec.signal))
+      return commandOutput(command, root, await run(root, command, exec))
     },
     presentCall: args => ({
       card: 'terminal',

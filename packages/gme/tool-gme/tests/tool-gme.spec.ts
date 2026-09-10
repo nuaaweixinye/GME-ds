@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { ShellExecutor, type ShellExecRequest, type ShellExecSpec, type ShellRunResult } from '@deepseek-ai/dsh-shell'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import ToolRuntime, { type ToolExecutionInput, type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { buildGmeCommand, buildGtestCommand } from '../src/commands.ts'
 import { parseModuleDependencies } from '../src/indexer.ts'
 import { inspectDeliveryDiff } from '../src/delivery.ts'
@@ -30,6 +30,10 @@ function shellResult(stdout = '', overrides: Partial<ShellRunResult> = {}): Shel
 class FakeShell extends ShellExecutor {
   requests: ShellExecRequest[] = []
   handler: (spec: ShellExecSpec) => ShellRunResult = () => shellResult()
+
+  override get sandboxMode() {
+    return 'workspace-write' as const
+  }
 
   override resolve(request: ShellExecRequest): ShellExecSpec {
     this.requests.push(request)
@@ -69,23 +73,36 @@ async function fixtureRoot(): Promise<string> {
 async function mount(root: string): Promise<{
   ctx: Context
   shell: FakeShell
-  call: (name: string, args: unknown) => Promise<ToolExecutionResult>
+  policySessions: unknown[]
+  call: (name: string, args: unknown, agent?: ToolExecutionInput['agent']) => Promise<ToolExecutionResult>
   dispose: () => Promise<void>
 }> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(FakeShell)
+  const policySessions: unknown[] = []
+  ctx.provide('sandboxPolicy', {
+    resolve: ({ session }: { session?: unknown } = {}) => {
+      policySessions.push(session)
+      return {
+        mode: session === undefined ? 'workspace-write' : 'danger-full-access',
+        workspaceRoot: root,
+      }
+    },
+  } as never)
   const fiber = await ctx.plugin(ToolGme, { projectRoot: root })
   let counter = 0
   return {
     ctx,
     shell: ctx.shell as FakeShell,
-    call: (name, args) => ctx.tools.execute({
+    policySessions,
+    call: (name, args, agent) => ctx.tools.execute({
       signal,
       callId: ToolCallId(`gme-${++counter}`),
       name,
       arguments: args,
+      ...agent === undefined ? {} : { agent },
     }),
     dispose: async () => { await fiber.dispose() },
   }
@@ -128,6 +145,22 @@ describe('GME P0 tools', () => {
     expect(firstText(result)).toContain('Submodules: 4 total, 1 aligned, 1 missing, 1 divergent, 1 conflicted')
     expect(firstText(result)).toContain('git version 2.51.0.windows.1')
     expect(firstText(result)).toContain('cmake version 3.31.0')
+  })
+
+  it('passes the calling session sandbox policy to every shell command', async () => {
+    const root = await fixtureRoot()
+    roots.push(root)
+    const runtime = await mount(root)
+    disposers.push(runtime.dispose)
+    const session = { header: { cwd: root } }
+    const agent = { session } as ToolExecutionInput['agent']
+
+    const result = await runtime.call('gme_project_status', {}, agent)
+
+    expect(result.isError).toBe(false)
+    expect(runtime.policySessions).toEqual([session, session, session, session])
+    expect(runtime.shell.requests).toHaveLength(4)
+    expect(runtime.shell.requests.every(request => request.sandboxPolicy?.mode === 'danger-full-access')).toBe(true)
   })
 
   it('rejects a directory that is not a GME-ACIS superproject before shell execution', async () => {

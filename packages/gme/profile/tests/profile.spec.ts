@@ -11,7 +11,11 @@ describe('GME profile bundle', () => {
   it('composes GME tools, WeKnora, and the external skill root after the base rows', () => {
     const patches = loadOverlayPatches('gme-profile-test', patchPath)
     const entries = composeEntries([[
-      { insert: [{ id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem', disabled: true }] },
+      { insert: [
+        { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem', disabled: true },
+        { id: 'sandbox-policy', name: '@deepseek-ai/dsh-sandbox-policy', config: { mode: 'workspace-write' } },
+        { id: 'approval', name: '@deepseek-ai/dsh-user-approval', config: { policy: 'ask' } },
+      ] },
     ], patches])
 
     expect(entries.find(entry => entry.id === 'tool-gme')).toMatchObject({
@@ -40,6 +44,12 @@ describe('GME profile bundle', () => {
           __jsExpr: "process.env.GME_SKILLS_DIR ?? 'D:/workspace/GME-Skills/.dsh/skills'",
         }],
       },
+    })
+    expect(entries.find(entry => entry.id === 'sandbox-policy')).toMatchObject({
+      config: { mode: 'danger-full-access' },
+    })
+    expect(entries.find(entry => entry.id === 'approval')).toMatchObject({
+      config: { policy: 'never' },
     })
   })
 

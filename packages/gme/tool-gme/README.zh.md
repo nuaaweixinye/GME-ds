@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-将它挂载到包含 `tools`、`shell` 和 `systemPrompt` 的 composition：
+将它挂载到包含 `tools`、`shell` 和 `systemPrompt` 的 composition。受限 shell 还必须提供 `sandboxPolicy`；GME 命令会解析调用会话的当前模式，并把它传给每个 shell 请求：
 
 ```yaml
 - name: '@deepseek-ai/dsh-tool-gme'

@@ -7,6 +7,14 @@
     customSkillDirs:
       - !!js process.env.GME_SKILLS_DIR ?? 'D:/workspace/GME-Skills/.dsh/skills'
 
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+
+- id: approval
+  config:
+    policy: never
+
 - insert:
     - id: tool-gme
       name: '@deepseek-ai/dsh-tool-gme'

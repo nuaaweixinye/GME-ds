@@ -66,6 +66,12 @@ export interface DeepSeekHarnessOptions extends HarnessClientOptions {
   maxTokens?: number
 }
 
+/** Options for queueing one prompt through {@link HarnessClient}. */
+export interface PromptOptions {
+  /** Resume persisted history for the session id when it exists. */
+  resumeIfExists?: boolean | undefined
+}
+
 /** One owned session activity interval, from enqueue receipt through idle. */
 export interface RunResult {
   /** The session the activity ran on. */

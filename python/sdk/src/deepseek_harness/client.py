@@ -174,10 +174,13 @@ class HarnessClient:
         session_id: str,
         content_blocks: list[JsonObject],
         *,
+        resume_if_exists: bool = False,
         on_notification: Callable[[Notification], None] | None = None,
         notification_subscription: "NotificationSubscription | None" = None,
     ) -> str:
         payload: JsonObject = {"sessionId": session_id, "contentBlocks": content_blocks}
+        if resume_if_exists:
+            payload["resumeIfExists"] = True
         response = self.request(
             "session/prompt",
             payload,

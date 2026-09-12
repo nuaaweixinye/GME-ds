@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import inspect
+import shutil
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -123,6 +125,151 @@ for line in sys.stdin:
         "reasoningEffort": "max",
         "maxTokens": 4096,
     }
+
+
+def test_high_level_sdk_serializes_recovery_only_when_opted_in(tmp_path: Path) -> None:
+    script = tmp_path / "fake_runtime.py"
+    prompt_dump = tmp_path / "prompt.jsonl"
+    script.write_text(
+        """
+import json
+import os
+import sys
+
+seq = 0
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-runtime"}}}), flush=True)
+    elif method == "session/prompt":
+        params = msg["params"]
+        with open(os.environ["PROMPT_DUMP"], "a") as output:
+            output.write(json.dumps(params) + "\\n")
+        message_id = f"message-{seq}"
+        seq += 1
+        event = {"type": "agent/inbox/spliced", "data": {"target": "next-turn", "start": 0, "inserted": [{"id": message_id}]}}
+        print(json.dumps({"jsonrpc": "2.0", "method": "session.event", "params": {"sessionId": params["sessionId"], "event": event}}), flush=True)
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"messageId": message_id}}), flush=True)
+        print(json.dumps({"jsonrpc": "2.0", "method": "session.status", "params": {"sessionId": params["sessionId"], "status": "idle"}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with DeepSeekHarness(
+        _launch_args=(sys.executable, str(script)),
+        cwd=str(tmp_path),
+        env={"PROMPT_DUMP": str(prompt_dump)},
+    ) as harness:
+        harness.run("continue", session_id="gme-job-1", resume_if_exists=True)
+        harness.run("new work", session_id="gme-job-2")
+
+    records = [json.loads(line) for line in prompt_dump.read_text().splitlines()]
+    assert records == [
+        {
+            "sessionId": "gme-job-1",
+            "contentBlocks": [{"type": "text", "text": "continue"}],
+            "resumeIfExists": True,
+        },
+        {
+            "sessionId": "gme-job-2",
+            "contentBlocks": [{"type": "text", "text": "new work"}],
+        },
+    ]
+
+
+def test_high_level_sdk_resumes_persisted_history_across_runtime_processes(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the source runtime persistence test")
+
+    model_requests: list[dict[str, object]] = []
+
+    class ScriptedModelHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("content-length", "0"))
+            model_requests.append(json.loads(self.rfile.read(length)))
+            answer = "persisted assistant answer" if len(model_requests) == 1 else "resumed assistant answer"
+            events = [
+                {"choices": [{"delta": {"role": "assistant", "content": None}}]},
+                {"choices": [{"delta": {"content": answer}}]},
+                {
+                    "choices": [{"delta": {}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 1},
+                },
+            ]
+            body = "".join(f"data: {json.dumps(event)}\n\n" for event in events) + "data: [DONE]\n\n"
+            encoded = body.encode()
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("content-length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, _format: str, *args: object) -> None:
+            pass
+
+    model_server = ThreadingHTTPServer(("127.0.0.1", 0), ScriptedModelHandler)
+    model_thread = threading.Thread(target=model_server.serve_forever, daemon=True)
+    model_thread.start()
+    model_host, model_port = model_server.server_address
+    dsh_home = tmp_path / "home"
+    launch_args = (
+        node,
+        "--import",
+        "tsx/esm",
+        str(repo_root / "apps" / "cli" / "src" / "bin.ts"),
+        "--profile",
+        "sdk-minimal",
+    )
+    runtime_env = {
+        "DSH_HOME": str(dsh_home),
+        "DEEPSEEK_API_KEY": "keyless-persistence-test",
+        "DEEPSEEK_BASE_URL": f"http://{model_host}:{model_port}",
+        "TSX_TSCONFIG_PATH": str(repo_root / "apps" / "cli" / "tsconfig.json"),
+    }
+
+    try:
+        with DeepSeekHarness(
+            _launch_args=launch_args,
+            cwd=str(tmp_path),
+            runtime_cwd=str(repo_root),
+            env=runtime_env,
+            request_timeout_seconds=60,
+        ) as first_runtime:
+            first_runtime.run("persisted user request", session_id="gme-job-1")
+
+        with DeepSeekHarness(
+            _launch_args=launch_args,
+            cwd=str(tmp_path),
+            runtime_cwd=str(repo_root),
+            env=runtime_env,
+            request_timeout_seconds=60,
+        ) as second_runtime:
+            second_runtime.run("continue", session_id="gme-job-1", resume_if_exists=True)
+    finally:
+        model_server.shutdown()
+        model_server.server_close()
+        model_thread.join(timeout=5)
+
+    assert len(model_requests) == 2
+    second_messages = model_requests[1]["messages"]
+    assert isinstance(second_messages, list)
+    assert any(
+        isinstance(message, dict)
+        and message.get("role") == "user"
+        and "persisted user request" in json.dumps(message.get("content"))
+        for message in second_messages
+    )
+    assert any(
+        isinstance(message, dict)
+        and message.get("role") == "assistant"
+        and "persisted assistant answer" in json.dumps(message.get("content"))
+        for message in second_messages
+    )
 
 
 def test_session_run_invokes_notification_callback_before_returning(tmp_path: Path) -> None:

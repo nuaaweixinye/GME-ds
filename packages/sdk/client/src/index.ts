@@ -26,5 +26,6 @@ export type {
   HarnessClientOptions,
   HarnessNotification,
   NotificationFilter,
+  PromptOptions,
   RunResult,
 } from './types.ts'

@@ -47,6 +47,7 @@
  * - `FAKE_STDERR`: write this line to stderr at boot (diagnostics-tail probe).
  * - `FAKE_STDERR_NO_NEWLINE`: write this to stderr WITHOUT a newline (buffer-flush probe).
  * - `FAKE_RECORD_INIT`: append each `initialize` params JSON to this file (handshake probe).
+ * - `FAKE_RECORD_PROMPT`: append each `session/prompt` params JSON to this file (wire serialization probe).
  */
 
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
@@ -223,6 +224,7 @@ reader.on('line', (line) => {
       respond({ serverInfo: { name: 'deepseek-harness-sdk-runtime', version: '0.0.1' } })
       return
     case 'session/prompt': {
+      if (env.FAKE_RECORD_PROMPT !== undefined) appendFileSync(env.FAKE_RECORD_PROMPT, `${JSON.stringify(frame.params)}\n`)
       const sessionId = sessionIdOf(frame.params)
       const messageId = `fake-user-${seq}`
       event(sessionId, 'agent/inbox/spliced', {

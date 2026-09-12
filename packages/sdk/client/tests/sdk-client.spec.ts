@@ -135,6 +135,29 @@ describe('DeepSeekHarness', () => {
     await harness.close()
   })
 
+  it('serializes recovery only when a run opts in', async () => {
+    const dir = await tempDir('sdk-client-prompt-')
+    const recordFile = join(dir, 'prompt.jsonl')
+    const harness = harnessWith({ FAKE_RECORD_PROMPT: recordFile })
+
+    await harness.run('continue', { sessionId: 'gme-job-1', resumeIfExists: true })
+    await harness.run('new work', { sessionId: 'gme-job-2' })
+    await harness.close()
+
+    const records = (await readFile(recordFile, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as object)
+    expect(records).toEqual([
+      {
+        sessionId: 'gme-job-1',
+        contentBlocks: [{ type: 'text', text: 'continue' }],
+        resumeIfExists: true,
+      },
+      {
+        sessionId: 'gme-job-2',
+        contentBlocks: [{ type: 'text', text: 'new work' }],
+      },
+    ])
+  })
+
   it('keeps events root-scoped while streaming notifications for the session tree', async () => {
     const harness = harnessWith({ FAKE_SUBAGENT: '1' })
     const seen: HarnessNotification[] = []

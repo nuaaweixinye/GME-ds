@@ -23,7 +23,7 @@ import {
 } from '@deepseek-ai/dsh-sdk-protocol'
 import { disposeRuntimeProcess } from './dispose.ts'
 import { resolveDshLaunch, type RuntimeProcessOptions } from './launch.ts'
-import type { HarnessClientOptions, HarnessNotification, NotificationFilter } from './types.ts'
+import type { HarnessClientOptions, HarnessNotification, NotificationFilter, PromptOptions } from './types.ts'
 
 /** Retained stderr lines used to diagnose an unexpected runtime death. */
 const STDERR_TAIL_LIMIT = 400
@@ -286,10 +286,15 @@ export class HarnessClient {
    * Queue one prompt and return its durable inbox identity.
    * @param sessionId - target session; an unknown id creates it.
    * @param contentBlocks - the user message, sent verbatim.
+   * @param options - optional persisted-session recovery behavior.
    * @returns the queued message id.
    */
-  async prompt(sessionId: string, contentBlocks: SdkPromptContentBlock[]): Promise<string> {
-    const params: SessionPromptParams = { sessionId, contentBlocks }
+  async prompt(sessionId: string, contentBlocks: SdkPromptContentBlock[], options?: PromptOptions): Promise<string> {
+    const params: SessionPromptParams = {
+      sessionId,
+      contentBlocks,
+      ...(options?.resumeIfExists === undefined ? {} : { resumeIfExists: options.resumeIfExists }),
+    }
     const result = await this.request('session/prompt', { ...params })
     if (!isRecord(result) || typeof result.messageId !== 'string') {
       throw new SdkProtocolError(`session/prompt returned no message id: ${JSON.stringify(result)}`)

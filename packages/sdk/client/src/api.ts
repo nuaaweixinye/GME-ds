@@ -148,10 +148,12 @@ export function createProcessDeepSeekHarness(
   }, () => createProcessHarnessClient(runtime))
 }
 
-/** Per-run options: target session and streaming observer. */
+/** Per-run options: target session, recovery behavior, and streaming observer. */
 export interface RunOptions {
   /** Session id to run on; omitted mints a fresh session per call. */
   sessionId?: string
+  /** Resume persisted history for the session id when it exists. */
+  resumeIfExists?: boolean
   /** Observer invoked with every notification for this session tree, in wire order. */
   onNotification?: (notification: HarnessNotification) => void
 }
@@ -169,11 +171,14 @@ export class HarnessSession {
   /**
    * Queue one prompt, then observe the whole session through its next idle.
    * @param input - prompt text, or content blocks sent verbatim.
-   * @param options - optional per-notification observer.
+   * @param options - optional persisted-session recovery and per-notification observer.
    * @returns the owned activity interval; rejects on transport loss, timeout,
    * or a protocol error.
    */
-  async run(input: string | SdkPromptContentBlock[], options?: Pick<RunOptions, 'onNotification'>): Promise<RunResult> {
+  async run(
+    input: string | SdkPromptContentBlock[],
+    options?: Pick<RunOptions, 'resumeIfExists' | 'onNotification'>,
+  ): Promise<RunResult> {
     await this.harness.start()
     const client = this.harness.client
     const contentBlocks = normalizeInput(input)
@@ -196,7 +201,7 @@ export class HarnessSession {
       options?.onNotification?.(notification)
     }
     try {
-      const messageId = await client.prompt(this.id, contentBlocks)
+      const messageId = await client.prompt(this.id, contentBlocks, { resumeIfExists: options?.resumeIfExists })
       let received = false
       while (true) {
         const notification = await subscription.next()

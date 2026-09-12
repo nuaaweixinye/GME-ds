@@ -12,6 +12,12 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import {
+  SessionAlreadyOwnedError,
+  SessionFormatUnsupportedError,
+  SessionPersistenceCorruptionError,
+  SessionPersistenceNotFoundError,
+} from '@deepseek-ai/dsh-session-persistence'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
@@ -71,6 +77,44 @@ async function makeHarness(storageDir: string) {
   await ctx.plugin(JsonlSessionPersistence, { root: storageDir })
   await new Promise(resolve => setTimeout(resolve, 50))
   return ctx
+}
+
+function makeSessionSelectionHarness(options: {
+  resumeFailure?: Error
+} = {}): {
+  calls: string[]
+  ctx: Context
+} {
+  const calls: string[] = []
+  const agents = new Map<string, Agent>()
+  const handle = (sessionId: string): AgentHandle => {
+    const agent = {
+      id: SessionId(sessionId),
+      followup: vi.fn(),
+    } as unknown as Agent
+    agents.set(sessionId, agent)
+    return { agent, dispose: () => Promise.resolve() }
+  }
+  const ctx = {
+    on: vi.fn(() => () => undefined),
+    agents: {
+      create: vi.fn(async ({ sessionId }: { sessionId: string }) => {
+        calls.push(`create:${sessionId}`)
+        return handle(sessionId)
+      }),
+      resume: vi.fn(async ({ resumeSessionId }: { resumeSessionId: string }) => {
+        calls.push(`resume:${resumeSessionId}`)
+        if (options.resumeFailure !== undefined) throw options.resumeFailure
+        return handle(resumeSessionId)
+      }),
+      get: (sessionId: string) => agents.get(sessionId),
+    },
+    get: () => ({
+      listProviders: () => [{ id: 'mock', name: 'Mock' }],
+      resolveCallConfig: () => Promise.resolve({}),
+    }),
+  } as unknown as Context
+  return { calls, ctx }
 }
 
 /** Drive the owning service so test lifecycle events carry the real parent scope. */
@@ -1083,6 +1127,72 @@ describe('HarnessSdkJsonRpcServer', () => {
       await ctx.fiber.dispose()
       await rm(storageDir, { recursive: true, force: true })
     }
+  })
+
+  it('creates a session only when explicit resume cannot find persisted state', async () => {
+    const { calls, ctx } = makeSessionSelectionHarness({
+      resumeFailure: new SessionPersistenceNotFoundError(SessionId('new')),
+    })
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    await server.initialize({ cwd: '.', provider: 'mock', model: 'model' })
+
+    await server.prompt({
+      sessionId: 'new',
+      contentBlocks: [{ type: 'text', text: 'first' }],
+      resumeIfExists: true,
+    })
+
+    expect(calls).toEqual(['resume:new', 'create:new'])
+    await server.shutdown()
+  })
+
+  it('resumes persisted state when explicitly requested', async () => {
+    const { calls, ctx } = makeSessionSelectionHarness()
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    await server.initialize({ cwd: '.', provider: 'mock', model: 'model' })
+
+    await server.prompt({
+      sessionId: 'stored',
+      contentBlocks: [{ type: 'text', text: 'continue' }],
+      resumeIfExists: true,
+    })
+
+    expect(calls).toEqual(['resume:stored'])
+    await server.shutdown()
+  })
+
+  it.each([
+    new SessionPersistenceCorruptionError('stored log is corrupt', { cause: new Error('invalid record') }),
+    new SessionFormatUnsupportedError('stored log version is unsupported'),
+    new SessionAlreadyOwnedError(SessionId('stored')),
+  ])('fails closed when explicit resume rejects with $name', async (resumeFailure) => {
+    const { calls, ctx } = makeSessionSelectionHarness({ resumeFailure })
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    await server.initialize({ cwd: '.', provider: 'mock', model: 'model' })
+
+    await expect(server.prompt({
+      sessionId: 'stored',
+      contentBlocks: [{ type: 'text', text: 'continue' }],
+      resumeIfExists: true,
+    })).rejects.toBe(resumeFailure)
+
+    expect(calls).toEqual(['resume:stored'])
+    await server.shutdown()
+  })
+
+  it.each([undefined, false])('creates directly when resumeIfExists is %s', async (resumeIfExists) => {
+    const { calls, ctx } = makeSessionSelectionHarness()
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    await server.initialize({ cwd: '.', provider: 'mock', model: 'model' })
+
+    await server.prompt({
+      sessionId: 'new',
+      contentBlocks: [{ type: 'text', text: 'first' }],
+      ...(resumeIfExists === undefined ? {} : { resumeIfExists }),
+    })
+
+    expect(calls).toEqual(['create:new'])
+    await server.shutdown()
   })
 
   it('coalesces concurrent session creation and retries a failed creation', async () => {

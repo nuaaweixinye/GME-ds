@@ -38,6 +38,8 @@ export interface SessionPromptParams {
   sessionId: string
   /** The prompt content blocks, sent verbatim as the user message. */
   contentBlocks: SdkPromptContentBlock[]
+  /** Resume persisted state when true; missing state creates the id, while other persistence failures reject. */
+  resumeIfExists?: boolean
 }
 
 /** Inline raster input admitted into the runtime's durable attachment store. */

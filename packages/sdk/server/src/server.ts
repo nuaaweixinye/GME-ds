@@ -13,6 +13,7 @@ import { admitEncodedImages, type EncodedImageAttachment, type ImageAttachmentRe
 import { createUserMessage, ReasoningEffortId, type ContentBlock, type LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { carrierKeyOf, type Scoped } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
@@ -175,7 +176,7 @@ export class HarnessSdkJsonRpcServer {
    */
   async prompt(params: SessionPromptParams): Promise<SessionPromptResult> {
     if (!this.initialized) throw new Error('SDK server is not initialized')
-    const rec = await this.getOrCreateSession(params.sessionId)
+    const rec = await this.getOrCreateSession(params.sessionId, params.resumeIfExists)
     // An agent-loop-only reload disposes the loop's agents while this record
     // survives; a retained agent accepts followup() silently, so validate the
     // record against the live registry before delivery.
@@ -256,13 +257,13 @@ export class HarnessSdkJsonRpcServer {
     }
   }
 
-  private async getOrCreateSession(sessionId: string): Promise<SessionRecord> {
+  private async getOrCreateSession(sessionId: string, resumeIfExists?: boolean): Promise<SessionRecord> {
     if (this.shuttingDown) throw new Error('SDK server is shutting down')
     const existing = this.sessions.get(sessionId)
     if (existing) return existing
     const pending = this.sessionCreations.get(sessionId)
     if (pending) return pending
-    const creation = this.createSession(sessionId)
+    const creation = this.createSession(sessionId, resumeIfExists)
     this.sessionCreations.set(sessionId, creation)
     void creation.then(
       () => { this.sessionCreations.delete(sessionId) },
@@ -271,21 +272,29 @@ export class HarnessSdkJsonRpcServer {
     return creation
   }
 
-  private async createSession(sessionId: string): Promise<SessionRecord> {
+  private async createSession(sessionId: string, resumeIfExists?: boolean): Promise<SessionRecord> {
     // No preset composition: this server's compositions keep the model-facing
     // rows in the host plane, so this agent reads them from the global layer. A
     // deployment that configures a roster has to join one here first
     // (@deepseek-ai/dsh-agent-presets README, "Composing a child agent").
-    const handle = await this.ctx.agents.create({
-      sessionId: brandString<SessionId>(sessionId),
-      meta: { cwd: this.cwd },
-      agentOptions: {
-        provider: this.provider,
-        model: this.model,
-        ...this.reasoningEffort === undefined ? {} : { reasoningEffort: this.reasoningEffort },
-        ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens },
-      },
-    })
+    const id = brandString<SessionId>(sessionId)
+    const agentOptions = {
+      provider: this.provider,
+      model: this.model,
+      ...this.reasoningEffort === undefined ? {} : { reasoningEffort: this.reasoningEffort },
+      ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens },
+    }
+    let handle: AgentHandle
+    if (resumeIfExists === true) {
+      try {
+        handle = await this.ctx.agents.resume({ resumeSessionId: id, agentOptions })
+      } catch (error) {
+        if (!(error instanceof SessionPersistenceNotFoundError)) throw error
+        handle = await this.ctx.agents.create({ sessionId: id, meta: { cwd: this.cwd }, agentOptions })
+      }
+    } else {
+      handle = await this.ctx.agents.create({ sessionId: id, meta: { cwd: this.cwd }, agentOptions })
+    }
     const rec: SessionRecord = { handle }
     this.sessions.set(sessionId, rec)
     return rec

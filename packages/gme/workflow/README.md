@@ -1,5 +1,5 @@
 ---
-description: "GME Test Agent workflows inside Harness, retaining the Python backend and Codex coding engine."
+description: "GME Test Agent workflows inside Harness, using the Python backend and a separate Harness SDK coding profile."
 kind: "package-reference"
 ---
 
@@ -9,11 +9,11 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This opt-in plugin lets Harness inspect interfaces, create and continue test tasks, build, test, audit memory, repair recorded failures, and submit PRs through GME Test Agent. Codex remains the coding engine. The package does not depend on or mount `tool-gme`.
+This opt-in plugin lets Harness inspect interfaces, create and continue test tasks, build, test, audit memory, repair recorded failures, and submit PRs through GME Test Agent. The Python backend runs coding and repair through the DeepSeek Harness Python SDK in a separate `sdk` profile. That coding profile includes file, search and PowerShell tools and excludes this workflow plugin to prevent recursive task creation. The package does not depend on or mount `tool-gme`.
 
 ## Use this package
 
-Use an existing GME Test Agent checkout with its Python dependencies, configured GME repository, compiler toolchain and Codex authentication. The plugin consumes `backend/run_backend.py`, `config.local.json`, and the existing task database; it does not copy the Python application or launch its Vue frontend.
+Use an existing GME Test Agent checkout with its Python dependencies, configured GME repository, compiler toolchain and DeepSeek credentials available to the coding profile. Install matching `deepseek-harness-sdk` and `deepseek-harness-runtime-bin` wheels in the backend Python environment. The plugin consumes `backend/run_backend.py`, `config.local.json`, and the existing task database; it does not copy the Python application or launch its Vue frontend.
 
 Build and link the package from this Harness source checkout:
 
@@ -54,7 +54,7 @@ Creation and actions can return `accepted: true`; this means queued work, not su
 
 ### Worker lifetime and credentials
 
-The first request reuses a server only after an authenticated health response. Otherwise, `autoStart: true` starts the configured Python entrypoint. Concurrent calls share startup. Authentication failure or an occupied non-GME port fails without starting another worker. The token is read from `tokenFile` (default `logs/web-api-token.log`); automatic startup creates a missing token file. Credentials never appear in tool arguments. Only the API token is explicitly forwarded to the managed child; Codex normally uses its existing local sign-in.
+The first request reuses a server only after an authenticated health response. Otherwise, `autoStart: true` starts the configured Python entrypoint. Concurrent calls share startup. Authentication failure or an occupied non-GME port fails without starting another worker. The token is read from `tokenFile` (default `logs/web-api-token.log`); automatic startup creates a missing token file. Credentials never appear in tool arguments. Only the API token is explicitly forwarded to the managed child. The coding SDK uses the configured `dsh_home` and `dsh_profile`; credentials must be available there. The outer workflow dialogue and each backend coding session have separate histories.
 
 Disposal terminates only a backend started by this plugin, including its child processes. Closing or reloading Harness can therefore interrupt owned jobs. An independently started backend survives. An owned worker that exits is restarted by a subsequent request; the interrupted job is not automatically retried. Aborting a tool stops waiting but does not cancel an accepted backend job. POST requests are never retried automatically: inspect tasks after an uncertain submission.
 

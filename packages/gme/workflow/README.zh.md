@@ -1,5 +1,5 @@
 ---
-description: "在 Harness 中操作 GME Test Agent 工作流，保留 Python 后端和 Codex 执行引擎。"
+description: "在 Harness 中操作 GME Test Agent 工作流，使用 Python 后端和独立的 Harness SDK 编码配置。"
 kind: "package-reference"
 ---
 
@@ -9,11 +9,11 @@ kind: "package-reference"
 
 ## 概要
 
-这个可选插件让 Harness 查询接口、创建和扩展测试任务、构建、运行测试、审计内存、修复已有失败并提交 PR。代码生成与修复仍由 Codex 执行。插件不依赖或加载 `tool-gme`。
+这个可选插件让 Harness 查询接口、创建和扩展测试任务、构建、运行测试、审计内存、修复已有失败并提交 PR。Python 后端通过 DeepSeek Harness Python SDK 在独立的 `sdk` 配置中执行代码生成与修复。该编码配置包含文件、搜索和 PowerShell 工具，并排除此工作流插件，防止递归创建任务。插件不依赖或加载 `tool-gme`。
 
 ## 使用方式
 
-需要现有 GME Test Agent 源码目录、Python 依赖、已配置的 GME 仓库、编译工具和 Codex 登录状态。插件使用 `backend/run_backend.py`、`config.local.json` 和现有任务数据库，不复制 Python 应用，也不启动 Vue 网页。
+需要现有 GME Test Agent 源码目录、Python 依赖、已配置的 GME 仓库、编译工具，以及编码配置可用的 DeepSeek 凭据。后端 Python 环境需安装版本匹配的 `deepseek-harness-sdk` 和 `deepseek-harness-runtime-bin` wheel。插件使用 `backend/run_backend.py`、`config.local.json` 和现有任务数据库，不复制 Python 应用，也不启动 Vue 网页。
 
 在 Harness 源码工作区中构建并安装：
 
@@ -54,7 +54,7 @@ pnpm dsh web
 
 ### 后台进程与凭据
 
-首次请求先通过带身份验证的健康检查复用已有后端；没有后端且 `autoStart: true` 时，启动配置的 Python 入口。并发请求共享启动过程。身份验证失败或端口上存在其他服务时直接报错。凭据从 `tokenFile` 读取，默认是 `logs/web-api-token.log`；自动启动会创建缺失的 token 文件。工具参数不包含凭据。托管子进程只显式传入 API token，Codex 通常使用已有本机登录状态。
+首次请求先通过带身份验证的健康检查复用已有后端；没有后端且 `autoStart: true` 时，启动配置的 Python 入口。并发请求共享启动过程。身份验证失败或端口上存在其他服务时直接报错。凭据从 `tokenFile` 读取，默认是 `logs/web-api-token.log`；自动启动会创建缺失的 token 文件。工具参数不包含凭据。托管子进程只显式传入 API token。编码 SDK 使用配置的 `dsh_home` 和 `dsh_profile`，该位置必须提供所需凭据。外层工作流对话和各后端编码会话分别保存历史。
 
 卸载插件只终止它自己启动的后端及子进程。因此关闭或重载 Harness 可能中断托管任务；独立启动的后端会保留。托管后端退出后，下一次请求可重新启动它，但不会自动重试中断的任务。取消工具等待不会取消已提交的后台任务。POST 请求不会自动重发；提交结果不明确时，先查询任务再决定是否重试。
 

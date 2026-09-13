@@ -90,7 +90,11 @@ describe('suggestedNextForReply', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `CI=true npm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run packages/gme/workflow/tests/next-step.spec.ts`
+Run:
+
+```bash
+CI=true npm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run packages/gme/workflow/tests/next-step.spec.ts
+```
 Expected: FAIL — cannot resolve `../src/next-step.ts`.
 
 - [ ] **Step 3: Implement the module**
@@ -163,7 +167,11 @@ export function suggestedNextForReply(data: unknown, status: string | null, jobI
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `CI=true npm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run packages/gme/workflow/tests/next-step.spec.ts`
+Run:
+
+```bash
+CI=true npm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run packages/gme/workflow/tests/next-step.spec.ts
+```
 Expected: PASS (all cases).
 
 - [ ] **Step 5: Commit**
@@ -292,7 +300,11 @@ describe('GME workflow tools', () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `CI=true npm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run packages/gme/workflow`
+Run:
+
+```bash
+CI=true npm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run packages/gme/workflow
+```
 Expected: FAIL — `gme_check`/`gme_generate`/`gme_decide` are unknown tools.
 
 - [ ] **Step 3: Rewrite `src/index.ts`**
@@ -428,7 +440,11 @@ Make exactly these changes (everything else in the file stays):
 
 - [ ] **Step 4: Run the package tests to verify they pass**
 
-Run: `CI=true npm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run packages/gme/workflow`
+Run:
+
+```bash
+CI=true npm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run packages/gme/workflow
+```
 Expected: PASS (workflow.spec.ts, backend.spec.ts, next-step.spec.ts — backend.spec.ts's three `python3` fixture tests fail on this Windows machine for lack of a `python3` alias; that is a pre-existing environmental failure, confirm identical failures before your change).
 
 - [ ] **Step 5: Regenerate the gme-workflow session snapshot**

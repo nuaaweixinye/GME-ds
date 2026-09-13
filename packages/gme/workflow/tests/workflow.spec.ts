@@ -36,7 +36,7 @@ async function setup(overrides: Partial<Workflow.Config> = {}, throughLoader = f
     if (req.url?.includes('slow')) { return }
     if (req.url?.includes('large')) { res.end(JSON.stringify({ report: '中'.repeat(10000) })); return }
     res.statusCode = req.method === 'POST' ? 202 : 200
-    res.end(JSON.stringify({ id: 'job-1', status: 'running_codex', metadata: { note: '正在生成测试' } }))
+    res.end(JSON.stringify({ id: 'job-1', status: 'running_agent', metadata: { note: '正在生成测试' } }))
   }
   const server = createServer((req, res) => { void handle(req, res).catch(() => { res.writeHead(500).end('{}') }) })
   server.listen(0, '127.0.0.1')
@@ -102,7 +102,7 @@ describe('GME workflow tools', () => {
     const result = await call('gme_workflow_create', { kind: 'tests', module: 'laws', interface_ids: ['law-1'] })
     expect(result.isError).not.toBe(true)
     expect(requests.at(-1)).toEqual({ method: 'POST', url: '/api/jobs/test-generation', body: { module: 'laws', interface_ids: ['law-1'] } })
-    expect(JSON.stringify(result)).toContain('running_codex')
+    expect(JSON.stringify(result)).toContain('running_agent')
     expect(JSON.stringify(result)).toContain('job-1')
   })
 

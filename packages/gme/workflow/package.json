@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-gme-workflow",
-  "description": "GME Test Agent workflows with the existing Codex backend",
+  "description": "GME Test Agent workflows with a separate Harness SDK coding runtime",
   "version": "0.1.2-alpha.5",
   "private": true,
   "type": "module",

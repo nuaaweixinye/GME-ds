@@ -217,34 +217,65 @@ function hasExactGrant(oldAcl: NativePtr, sidPtr: NativePtr): boolean {
   return false
 }
 
+/** Whether the ACL already carries the materialized full-access owner ACE. */
+function hasExactOwnerGrant(oldAcl: NativePtr, ownerPtr: NativePtr): boolean {
+  const aclSize = decodeUint16At(oldAcl, 2)
+  const aceCount = decodeUint16At(oldAcl, 4)
+  if (aclSize < 8 || aclSize > 1_048_576) return false // implausible: fall back to the merge path
+  let offset = 8 // the first ACE follows the 8-byte ACL header
+  for (let index = 0; index < aceCount; index++) {
+    const aceSize = decodeUint16At(oldAcl, offset + 2)
+    if (aceSize < 8 || offset + aceSize > aclSize) return false // implausible: fall back to the merge path
+    const exact = decodeUint8At(oldAcl, offset) === abi.ACCESS_ALLOWED_ACE_TYPE
+      && decodeUint8At(oldAcl, offset + 1) === abi.SUB_CONTAINERS_AND_OBJECTS_INHERIT
+      && decodeUint32At(oldAcl, offset + 4) === abi.FILE_ALL_ACCESS
+    if (exact && sameSidAt(oldAcl, offset + 8, ownerPtr, 0)) return true
+    offset += aceSize
+  }
+  return false
+}
+
 /**
  * Grant `GRANT_MASK` (Write+Delete, displays as "Modify") to the capability SID
- * on `path`, inheriting to subcontainers and objects. Idempotent: when the
- * directory's current explicit DACL already carries the exact ACE (the
- * per-session grant surviving from a previous server lifetime), the
- * SetNamedSecurityInfoW apply is SKIPPED — it would otherwise re-propagate
- * the identical ACE across the whole tree (eager inheritance; minutes on
- * large workspaces). Otherwise read-merge-write: the new ACE merges into the
- * directory's CURRENT explicit DACL (same shape as {@link revokeWrite}), so
- * pre-existing explicit ACEs survive. Runs under the per-path lock. The
- * directory must be owned by the caller (owner implicit WRITE_DAC) — same
- * precondition as the POC.
+ * on `path`, inheriting to subcontainers and objects, while materializing an
+ * explicit full-access owner ACE in the same DACL update: a restricted-token
+ * access check does not honor the OWNER RIGHTS (S-1-3-4) ACE shape Python's
+ * tempfile and hardened roots place on creator-owned trees, so without the
+ * explicit owner SID the confined child cannot even READ the workspace
+ * (verified empirically: an explicit-user ACE reads, an OWNER RIGHTS-only ACE
+ * denies). Idempotent: when the directory's current explicit DACL already
+ * carries both exact ACEs (the per-session grant surviving from a previous
+ * server lifetime), the SetNamedSecurityInfoW apply is SKIPPED — it would
+ * otherwise re-propagate the identical ACEs across the whole tree (eager
+ * inheritance; minutes on large workspaces). Otherwise read-merge-write: the
+ * new ACEs merge into the directory's CURRENT explicit DACL (same shape as
+ * {@link revokeWrite}), so pre-existing explicit ACEs survive. Runs under the
+ * per-path lock. The directory must be owned by the caller (owner implicit
+ * WRITE_DAC) — same precondition as the POC.
  * @param api - the binding table.
  * @param path - the directory whose DACL gains the grant (the workspace or temp root).
  * @param sidPtr - the capability SID the ACE names.
  */
 export function grantWrite(api: Win32Bindings, path: string, sidPtr: NativePtr): void {
   withPathLock(api, path, () => {
-    const { oldAcl, descriptor } = readCurrentDacl(api, path)
-    if (oldAcl !== null && hasExactGrant(oldAcl, sidPtr)) {
-      // The exact ACE stands: releasing the descriptor is the whole operation.
+    const { oldAcl, descriptor, owner } = readCurrentDacl(api, path, true)
+    // Skip only when the capability ACE stands AND (no owner is readable, or
+    // the materialized owner ACE already stands with it).
+    if (oldAcl !== null && hasExactGrant(oldAcl, sidPtr)
+      && (owner === null || hasExactOwnerGrant(oldAcl, owner))) {
       if (descriptor !== null) {
         const freed = api.localFree(descriptor)
         if (!isNullPtr(freed)) throwLastError(api, 'LocalFree', `grantWrite(${path}) descriptor`)
       }
       return
     }
-    mergeAndApply(api, path, buildExplicitAccess(sidPtr, abi.GRANT_ACCESS, abi.GRANT_MASK), oldAcl, descriptor, 'grantWrite')
+    const entries = owner === null
+      ? buildExplicitAccess(sidPtr, abi.GRANT_ACCESS, abi.GRANT_MASK)
+      : Buffer.concat([
+          buildExplicitAccess(owner, abi.GRANT_ACCESS, abi.FILE_ALL_ACCESS),
+          buildExplicitAccess(sidPtr, abi.GRANT_ACCESS, abi.GRANT_MASK),
+        ])
+    mergeAndApply(api, path, entries, oldAcl, descriptor, 'grantWrite', owner === null ? 1 : 2)
   })
 }
 

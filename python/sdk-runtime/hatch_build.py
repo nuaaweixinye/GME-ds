@@ -77,13 +77,13 @@ class RuntimeBuildHook(BuildHookInterface):
         runtime_files = sorted(
             runtime_dir.glob("deepseek-harness-sdk-runtime-*") if runtime_dir.is_dir() else []
         )
-        expected_files = (
-            [expected_executable, f"{expected_executable.removesuffix('.exe')}-rg.exe"]
-            if expected_executable.endswith(".exe")
-            else [expected_executable, f"{expected_executable}-rg"]
-        )
-        if "-macos-" in expected_executable:
-            expected_files.append(f"{expected_executable}-spawn-helper")
+        if expected_executable.endswith(".exe"):
+            stem = expected_executable.removesuffix(".exe")
+            expected_files = [expected_executable, f"{stem}-rg.exe", f"{stem}-acl.exe"]
+        else:
+            expected_files = [expected_executable, f"{expected_executable}-rg"]
+            if "-macos-" in expected_executable:
+                expected_files.append(f"{expected_executable}-spawn-helper")
         expected_files.sort()
         found_files = [path.name for path in runtime_files]
         if found_files != expected_files:

@@ -22,7 +22,7 @@
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`、`ctx.userQuestions` | `tool/call`、`tool/result after a UI/provider answers the question` | - | ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。 |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`、`ctx.codeRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: ptc`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 PTC mode Agent Note）。在 `ptc` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
 | `@deepseek-ai/dsh-tool-gme` | `gme_build`、`gme_delivery_check`、`gme_locate_api`、`gme_project_status`、`gme_test` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`host filesystem and processes for build/test calls` | - | GME 工具先校验 GME-ACIS checkout 和受约束的领域参数，再通过已挂载的 shell executor 检查 Git、定位 API，或运行 CMake 与 GoogleTest。 |
-| `@deepseek-ai/dsh-gme-workflow` | `gme_workflow_action`, `gme_workflow_create`, `gme_workflow_query`, `gme_workflow_submit` | `ctx.tools`, `ctx.systemPrompt`, `ctx.subprocess (automatic backend startup)` | `tool/call`, `tool/result`, `GME backend tasks and requested GitHub PRs` | - | 可选的 GME Test Agent 工作流 bundle。现有 Python 后端负责任务、工作区和验证；Codex 保持为执行引擎。不依赖 tool-gme。POST 被接收不代表任务完成。 |
+| `@deepseek-ai/dsh-gme-workflow` | `gme_check`、`gme_decide`、`gme_generate` | `ctx.tools`、`ctx.systemPrompt`、`ctx.subprocess (automatic backend startup)` | `tool/call`、`tool/result`、`GME backend tasks and requested GitHub PRs` | - | 可选的 GME Test Agent 工作流 bundle。现有 Python 后端负责任务、工作区和验证；Codex 保持为执行引擎。不依赖 tool-gme。POST 被接收不代表任务完成。 |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费方（由 `@deepseek-ai/dsh-pwsh-local` 等 PowerShell 执行器为 `ctx.shell` 提供后端）；除沙箱接口外，它逐项对应 bash 工具调用。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具收集／停止；托管的 `DSH_*` 环境来自 `@deepseek-ai/dsh-shell-env`。每次调用都在新进程中运行，不使用持久 PTY 会话。路径采用原生 `C:\...` 形式，变量采用 `$env:NAME`。 |
@@ -327,125 +327,9 @@ GME 工具先校验 GME-ACIS checkout 和受约束的领域参数，再通过已
 
 ## `@deepseek-ai/dsh-gme-workflow`
 
-### `gme_workflow_action`
+### `gme_check`
 
-扩展或重试任务、构建、运行测试或审计内存。cleanup、delete 和 remove_tests 需要用户请求。取消等待不会取消后台任务。
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "job_id": {
-      "type": "string"
-    },
-    "action": {
-      "type": "string",
-      "enum": [
-        "extend",
-        "retry",
-        "build",
-        "test",
-        "memory_audit",
-        "remove_tests",
-        "cleanup",
-        "delete"
-      ]
-    },
-    "goal": {
-      "type": "string"
-    },
-    "interface_ids": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "filter": {
-      "type": "string"
-    },
-    "tests": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "file": {
-            "type": "string"
-          },
-          "suite": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "file",
-          "suite",
-          "name"
-        ]
-      }
-    }
-  },
-  "required": [
-    "job_id",
-    "action"
-  ]
-}
-```
-
-源码： [`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
-
-### `gme_workflow_create`
-
-创建测试任务、批量任务或修复已有失败。返回已接收的任务，声明完成前需查询进度。
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "kind": {
-      "type": "string",
-      "enum": [
-        "tests",
-        "batch",
-        "fix"
-      ]
-    },
-    "module": {
-      "type": "string"
-    },
-    "goal": {
-      "type": "string",
-      "description": "Free-form test target, instead of interface_ids. Batch requires interface_ids."
-    },
-    "interface_ids": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "failure_ids": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "batch_size": {
-      "type": "integer"
-    }
-  },
-  "required": [
-    "kind"
-  ]
-}
-```
-
-源码： [`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
-
-### `gme_workflow_query`
-
-查询 GME 接口、任务、进度、失败或验证报告，不启动代码生成。大报告返回后续分页偏移量。
+无副作用的读取：接口目录、任务、事件、失败（含 observations）、测试结果与产物。不会启动编码工作；大报告返回后续分页偏移量。
 
 ```json
 {
@@ -454,18 +338,15 @@ GME 工具先校验 GME-ACIS checkout 和受约束的领域参数，再通过已
     "resource": {
       "type": "string",
       "enum": [
-        "health",
-        "environment",
         "catalogs",
         "catalog",
         "jobs",
         "job",
         "events",
-        "test_results",
-        "artifacts",
         "failures",
         "failure",
-        "observations"
+        "test_results",
+        "artifacts"
       ]
     },
     "job_id": {
@@ -492,26 +373,29 @@ GME 工具先校验 GME-ACIS checkout 和受约束的领域参数，再通过已
 }
 ```
 
-源码： [`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
+来源：[`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
 
-### `gme_workflow_submit`
+### `gme_decide`
 
-仅在用户请求时推送修改并创建 GitHub PR。known_failures 添加 skip，selected_tests 提交指定测试，task 提交任务修改。
+对外或破坏性的决策——创建 PR、skip、移除测试、清理、删除。仅在向用户展示当前情况并获得明确同意后调用；传入 confirm: true 才执行。
 
 ```json
 {
   "type": "object",
   "properties": {
-    "job_id": {
-      "type": "string"
-    },
-    "kind": {
+    "decision": {
       "type": "string",
       "enum": [
-        "task",
-        "known_failures",
-        "selected_tests"
+        "skip_pr",
+        "selected_tests_pr",
+        "create_pr",
+        "remove_tests",
+        "delete_job",
+        "cleanup"
       ]
+    },
+    "job_id": {
+      "type": "string"
     },
     "tests": {
       "type": "array",
@@ -535,16 +419,73 @@ GME 工具先校验 GME-ACIS checkout 和受约束的领域参数，再通过已
           "name"
         ]
       }
+    },
+    "confirm": {
+      "type": "boolean",
+      "description": "Set true only after the user explicitly agreed to this decision."
     }
   },
   "required": [
-    "job_id",
+    "decision",
+    "job_id"
+  ]
+}
+```
+
+来源：[`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
+
+### `gme_generate`
+
+自主驱动 GME 测试生成与修复：按接口或目标创建任务、批量生成、修复已记录的失败、扩展或重试任务。用 gme_check 轮询进度直到 needs_review，然后向用户报告并等待。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "tests",
+        "batch",
+        "fix",
+        "extend",
+        "retry"
+      ]
+    },
+    "module": {
+      "type": "string"
+    },
+    "goal": {
+      "type": "string",
+      "description": "Free-form test target, instead of interface_ids. Batch requires interface_ids."
+    },
+    "interface_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "batch_size": {
+      "type": "integer"
+    },
+    "job_id": {
+      "type": "string",
+      "description": "Task to extend or retry (kind=extend|retry)."
+    }
+  },
+  "required": [
     "kind"
   ]
 }
 ```
 
-源码： [`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
+来源：[`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
 
 Opt-in GME Test Agent workflow bundle. The existing Python backend owns tasks, worktrees and validation; Codex remains the coding engine. No dependency on tool-gme. POST acceptance does not imply task completion.
 

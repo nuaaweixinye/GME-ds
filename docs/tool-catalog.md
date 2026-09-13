@@ -18,7 +18,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: ptc` / `mode: both` (see the PTC mode Agent Note). Under `ptc` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-tool-gme` | `gme_build`, `gme_delivery_check`, `gme_locate_api`, `gme_project_status`, `gme_test` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `host filesystem and processes for build/test calls` | - | The GME tools validate a GME-ACIS checkout and constrained domain arguments before inspecting Git, locating APIs, or running CMake and GoogleTest through the mounted shell executor. |
-| `@deepseek-ai/dsh-gme-workflow` | `gme_workflow_action`, `gme_workflow_create`, `gme_workflow_query`, `gme_workflow_submit` | `ctx.tools`, `ctx.systemPrompt`, `ctx.subprocess (automatic backend startup)` | `tool/call`, `tool/result`, `GME backend tasks and requested GitHub PRs` | - | Opt-in GME Test Agent workflow bundle. The existing Python backend owns tasks, worktrees and validation; Codex remains the coding engine. No dependency on tool-gme. POST acceptance does not imply task completion. |
+| `@deepseek-ai/dsh-gme-workflow` | `gme_check`, `gme_decide`, `gme_generate` | `ctx.tools`, `ctx.systemPrompt`, `ctx.subprocess (automatic backend startup)` | `tool/call`, `tool/result`, `GME backend tasks and requested GitHub PRs` | - | Opt-in GME Test Agent workflow bundle. The existing Python backend owns tasks, worktrees and validation; Codex remains the coding engine. No dependency on tool-gme. POST acceptance does not imply task completion. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
@@ -323,125 +323,9 @@ The GME tools validate a GME-ACIS checkout and constrained domain arguments befo
 
 ## `@deepseek-ai/dsh-gme-workflow`
 
-### `gme_workflow_action`
+### `gme_check`
 
-Continue/retry a task, build, test or audit memory. cleanup, delete and remove_tests require a user request. Aborting a wait does not cancel background work.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "job_id": {
-      "type": "string"
-    },
-    "action": {
-      "type": "string",
-      "enum": [
-        "extend",
-        "retry",
-        "build",
-        "test",
-        "memory_audit",
-        "remove_tests",
-        "cleanup",
-        "delete"
-      ]
-    },
-    "goal": {
-      "type": "string"
-    },
-    "interface_ids": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "filter": {
-      "type": "string"
-    },
-    "tests": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "file": {
-            "type": "string"
-          },
-          "suite": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "file",
-          "suite",
-          "name"
-        ]
-      }
-    }
-  },
-  "required": [
-    "job_id",
-    "action"
-  ]
-}
-```
-
-Source: [`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
-
-### `gme_workflow_create`
-
-Create a test task, batch, or repair of recorded failures. Returns accepted tasks; query progress before claiming completion.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "kind": {
-      "type": "string",
-      "enum": [
-        "tests",
-        "batch",
-        "fix"
-      ]
-    },
-    "module": {
-      "type": "string"
-    },
-    "goal": {
-      "type": "string",
-      "description": "Free-form test target, instead of interface_ids. Batch requires interface_ids."
-    },
-    "interface_ids": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "failure_ids": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "batch_size": {
-      "type": "integer"
-    }
-  },
-  "required": [
-    "kind"
-  ]
-}
-```
-
-Source: [`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
-
-### `gme_workflow_query`
-
-Read GME interfaces, tasks, progress, failures or verification reports. Does not start coding work. Large reports return continuation offsets.
+Side-effect-free reads: interface catalogs, tasks, events, failures (with observations), test results and artifacts. Does not start coding work; large reports return continuation offsets.
 
 ```json
 {
@@ -450,18 +334,15 @@ Read GME interfaces, tasks, progress, failures or verification reports. Does not
     "resource": {
       "type": "string",
       "enum": [
-        "health",
-        "environment",
         "catalogs",
         "catalog",
         "jobs",
         "job",
         "events",
-        "test_results",
-        "artifacts",
         "failures",
         "failure",
-        "observations"
+        "test_results",
+        "artifacts"
       ]
     },
     "job_id": {
@@ -490,24 +371,27 @@ Read GME interfaces, tasks, progress, failures or verification reports. Does not
 
 Source: [`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
 
-### `gme_workflow_submit`
+### `gme_decide`
 
-Push changes and create a GitHub PR only when requested. known_failures adds skips; selected_tests submits the listed tests; task submits task changes.
+Outward or destructive decisions — PRs, skips, test removal, cleanup, deletion. Only call after showing the user the situation and getting explicit consent; pass confirm: true to execute.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "job_id": {
-      "type": "string"
-    },
-    "kind": {
+    "decision": {
       "type": "string",
       "enum": [
-        "task",
-        "known_failures",
-        "selected_tests"
+        "skip_pr",
+        "selected_tests_pr",
+        "create_pr",
+        "remove_tests",
+        "delete_job",
+        "cleanup"
       ]
+    },
+    "job_id": {
+      "type": "string"
     },
     "tests": {
       "type": "array",
@@ -531,10 +415,67 @@ Push changes and create a GitHub PR only when requested. known_failures adds ski
           "name"
         ]
       }
+    },
+    "confirm": {
+      "type": "boolean",
+      "description": "Set true only after the user explicitly agreed to this decision."
     }
   },
   "required": [
-    "job_id",
+    "decision",
+    "job_id"
+  ]
+}
+```
+
+Source: [`packages/gme/workflow/src/index.ts`](../packages/gme/workflow/src/index.ts)
+
+### `gme_generate`
+
+Autonomously drive GME test generation and repair: create tasks from interfaces or a goal, batch, fix recorded failures, extend or retry a task. Poll progress with gme_check until needs_review, then report and wait for the user.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "tests",
+        "batch",
+        "fix",
+        "extend",
+        "retry"
+      ]
+    },
+    "module": {
+      "type": "string"
+    },
+    "goal": {
+      "type": "string",
+      "description": "Free-form test target, instead of interface_ids. Batch requires interface_ids."
+    },
+    "interface_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "batch_size": {
+      "type": "integer"
+    },
+    "job_id": {
+      "type": "string",
+      "description": "Task to extend or retry (kind=extend|retry)."
+    }
+  },
+  "required": [
     "kind"
   ]
 }

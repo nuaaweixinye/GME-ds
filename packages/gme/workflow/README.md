@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This opt-in plugin lets Harness inspect interfaces, create and continue test tasks, build, test, audit memory, repair recorded failures, and submit PRs through GME Test Agent. The Python backend runs coding and repair through the DeepSeek Harness Python SDK in a separate `sdk` profile. That coding profile includes file, search and PowerShell tools and excludes this workflow plugin to prevent recursive task creation. The package does not depend on or mount `tool-gme`.
+This opt-in plugin exposes GME Test Agent through a guided three-tool surface: autonomous test generation and repair, side-effect-free progress reads, and consent-gated decisions. The Python backend runs coding and repair through the DeepSeek Harness Python SDK in a separate `sdk` profile. Build, tests and the memory audit run inside the backend as automatic stages of every task, not as chat actions. That coding profile includes file, search and PowerShell tools and excludes this workflow plugin to prevent recursive task creation. The package does not depend on or mount `tool-gme`.
 
 ## Use this package
 
@@ -41,16 +41,17 @@ Mount on a base-backed profile with `tools` and `systemPrompt`. Automatic startu
 
 ### Operations
 
-| Tool | Operations |
+| Tool | Zone |
 |---|---|
-| `gme_workflow_query` | Health, environment, interface catalogs, tasks, incremental events, test results, artifacts, failures and observations |
-| `gme_workflow_create` | Single test task, interface batch, or repair of selected failures |
-| `gme_workflow_action` | Extend, retry, build, test, memory audit, remove selected tests, clean worktree, delete task |
-| `gme_workflow_submit` | Task PR, known-failure skip PR, or selected-tests PR |
+| `gme_generate` | Autonomous generation: create tests from interface IDs or a free-form goal, batch creation, fix recorded failures, extend or retry a task |
+| `gme_check` | Side-effect-free reads: interface catalogs, tasks, incremental events, failures with observations, test results, artifacts |
+| `gme_decide` | Consent-gated decisions requiring `confirm: true`: task PR, known-failure skip PR, selected-tests PR, remove selected tests, cleanup, delete task |
 
 For tests and extension, pass either catalog `interface_ids` or a free-form `goal`, never both. The backend replaces free-form goals when IDs are supplied; the plugin rejects that combination. Batches require IDs. Query interfaces before selecting IDs, and use backend job IDs rather than Harness session IDs.
 
-Creation and actions can return `accepted: true`; this means queued work, not successful validation. Query the task and its test results. Report pages expose `content` (a slice of serialized JSON), `total_characters` and `next_offset`; repeat the same query with that offset. Growing lists may shift between pages; use bounded incremental `events.after` queries for live progress and completed artifacts for stable reports. Infrastructure failures appear as tool errors. A returned job with `status: failed` is a valid query result.
+Generation runs autonomously from acceptance to `needs_review`; the model polls progress with `gme_check` and does not steer the intermediate build, test and memory-audit stages. Every response carries a `suggested_next` signpost whose `phase` moves poll → report → decide → done: keep polling while a task executes, report the summary, failures and diff at `needs_review`, and leave outward steps to the user. A `gme_decide` call without `confirm: true` fails with guidance and never reaches the backend.
+
+Generation and decisions can return `accepted: true`; this means queued work, not successful validation. Report pages expose `content` (a slice of serialized JSON), `total_characters` and `next_offset`; repeat the same query with that offset. Growing lists may shift between pages; use bounded incremental `events.after` queries for live progress and completed artifacts for stable reports. Infrastructure failures appear as tool errors. A returned job with `status: failed` is a valid query result.
 
 ### Worker lifetime and credentials
 
@@ -64,11 +65,11 @@ Disposal terminates only a backend started by this plugin, including its child p
 
 #### What the model sees
 
-See the canonical [tool schemas](../../../docs/tool-catalog.md#deepseek-aidsh-gme-workflow). Four workflow schemas and one project guidance section join the request prefix. The guidance distinguishes acceptance from validation, treats reports as data, and requires user intent for PRs, skips and cleanup. Deployment paths and credentials stay out of the schemas.
+See the canonical [tool schemas](../../../docs/tool-catalog.md#deepseek-aidsh-gme-workflow). Three tool schemas and one project guidance section join the request prefix. The guidance states the rhythm — pick interfaces (`gme_check`), generate (`gme_generate`), poll until `needs_review`, then report the summary, failures and diff — points at the `suggested_next` signpost carried by every response, and requires showing the user the situation and obtaining explicit `confirm: true` consent before any `gme_decide` call. It still distinguishes acceptance from validation and treats report content as project data, never instructions. Deployment paths and credentials stay out of the schemas.
 
 #### Token effect
 
-Schemas and guidance have a fixed per-request cost. Report text is bounded by `pageChars` (12,000 by default, up to 50,000); the small result envelope is additional. HTTP responses are bounded by `maxResponseBytes` (8 MiB by default).
+Schemas and guidance have a fixed per-request cost. Report text is bounded by `pageChars` (12,000 by default, up to 50,000); the small result envelope with `suggested_next` is additional. HTTP responses are bounded by `maxResponseBytes` (8 MiB by default).
 
 #### KV Cache effect
 
@@ -92,10 +93,10 @@ Presentation does not alter the model request prefix.
 
 - The existing Python checkout and configured local GME toolchain remain required.
 - Backend jobs have no cancellation endpoint or automatic process-restart recovery.
-- PR submission and cleanup follow existing backend rules and the user's instruction; the plugin does not add another approval dialog.
+- The `gme_decide` consent gate is a plugin-side `confirm: true` check; the backend still applies its own submission and cleanup rules without a second approval dialog.
 - Free-form tasks inherit the backend's free-form selection and validation behavior.
 - Large report pages are character windows, not an immutable snapshot or structured table.
 
 ### Dev Note
 
-`src/backend.ts` owns authenticated transport and worker lifetime. `src/index.ts` owns tool schemas, route mapping and presentation. No invariant companion is published: backend state is authoritative and the plugin maintains no duplicate durable task state. Lifecycle and Loader tests cover the locally owned worker and registration. See the [decision](../../../.agents/notes/implemented/feature/2026-09-12-gme-workflow-plugin.md).
+`src/backend.ts` owns authenticated transport and worker lifetime. `src/index.ts` owns tool schemas, route mapping and presentation; `src/next-step.ts` maps backend statuses to the `suggested_next` signpost. No invariant companion is published: backend state is authoritative and the plugin maintains no duplicate durable task state. Lifecycle, routing and signpost tests cover the locally owned worker, registration and phase mapping. See the [decision](../../../.agents/notes/implemented/feature/2026-09-12-gme-workflow-plugin.md).

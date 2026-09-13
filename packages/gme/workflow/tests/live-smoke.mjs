@@ -13,12 +13,12 @@ try {
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(Tools)
   await ctx.plugin(Workflow, { backendRoot, autoStart: false })
-  for (const resource of ['health', 'catalogs', 'jobs']) {
-    const result = await ctx.tools.execute({ name: 'gme_workflow_query', arguments: { resource }, callId: ToolCallId(`live-${resource}`), signal: new AbortController().signal })
+  for (const resource of ['catalogs', 'jobs']) {
+    const result = await ctx.tools.execute({ name: 'gme_check', arguments: { resource }, callId: ToolCallId(`live-${resource}`), signal: new AbortController().signal })
     assert(!result.isError, JSON.stringify(result))
     const page = JSON.parse(result.content[0].text)
     assert.equal(page.accepted, false)
-    if (resource === 'health') assert.deepEqual(JSON.parse(page.content), { ok: true, authenticated: true })
+    assert(typeof page.suggested_next?.phase === 'string')
     process.stdout.write(`${resource}: OK (${page.total_characters} report characters)\n`)
   }
 } finally { await ctx.fiber.dispose() }

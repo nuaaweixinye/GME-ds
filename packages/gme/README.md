@@ -22,12 +22,13 @@ The `gme/` group adapts DeepSeek Harness to the GME-ACIS superproject. Use its t
 <a id="packages"></a>
 ## Packages
 
-Two packages separate reusable project behavior from machine-local profile composition.
+The packages separate project tools, machine-local profile composition, and GME Test Agent workflows.
 
 | Package | Role |
 |---|---|
 | [`tool-gme/`](tool-gme/README.md) | Exposes GME project status, build, test, API-location, and delivery tools |
 | [`profile/`](profile/README.md) | Composes GME tools, external skills, and WeKnora into a private profile |
+| [`workflow/`](workflow/README.md) | Operates GME Test Agent tasks through its Python backend, retaining Codex and independent of tool-gme |
 
 <a id="related-documentation"></a>
 ## Related documentation

@@ -216,6 +216,7 @@
       "@deepseek-ai/dsh-experimental-agent-team": ["./packages/experimental/agent-team/src"],
       "@deepseek-ai/dsh-experimental-agent-team-profile": ["./packages/experimental/agent-team-profile/src"],
       "@deepseek-ai/dsh-gme-profile": ["./packages/gme/profile/src"],
+      "@deepseek-ai/dsh-gme-workflow": ["./packages/gme/workflow/src"],
       "@deepseek-ai/dsh-experimental-agent-team-web-profile": ["./packages/experimental/agent-team-web-profile/src"],
       "@deepseek-ai/dsh-experimental-tool-agent-team": ["./packages/experimental/tool-agent-team/src"],
       "@deepseek-ai/dsh-experimental-webworker-runtime": ["./packages/experimental/webworker-runtime/src"],

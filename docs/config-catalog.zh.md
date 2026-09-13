@@ -753,6 +753,46 @@ export type Config = LocalConfig
 
 来源：[`packages/fs/fs-sandbox/src/index.ts:45`](../packages/fs/fs-sandbox/src/index.ts)
 
+<a id="deepseek-aidsh-gme-workflow"></a>
+
+## `@deepseek-ai/dsh-gme-workflow`
+
+依赖： `tools` · `systemPrompt`
+
+```ts config-catalog
+/** Trusted deployment options, never exposed as model arguments. */
+export interface Config extends Partial<Omit<BackendOptions, 'backendRoot'>> {
+  /** GME Test Agent checkout containing backend/run_backend.py. */
+  backendRoot: string
+  /** UTF-16 characters per returned report page. */
+  pageChars?: number
+}
+
+/** Fully resolved deployment settings; model input cannot alter these paths. */
+export interface BackendOptions {
+  /** Existing GME Test Agent checkout used as the worker directory. */
+  backendRoot: string
+  /** Python executable with the backend's dependencies installed. */
+  pythonPath: string
+  /** Backend JSON configuration, absolute or relative to backendRoot. */
+  configFile: string
+  /** API token file, absolute or relative to backendRoot. */
+  tokenFile: string
+  /** Backend TCP port on IPv4 loopback. */
+  port: number
+  /** Start an owned Python worker when the configured port refuses connections. */
+  autoStart: boolean
+  /** Deadline in milliseconds for one HTTP request including its body. */
+  timeoutMs: number
+  /** Deadline in milliseconds for an owned worker to become healthy. */
+  startupTimeoutMs: number
+  /** Maximum bytes retained from one HTTP response. */
+  maxResponseBytes: number
+}
+```
+
+源码： [`packages/gme/workflow/src/index.ts:10`](../packages/gme/workflow/src/index.ts)
+
 <a id="deepseek-aidsh-goal"></a>
 
 ## `@deepseek-ai/dsh-goal`
@@ -2725,7 +2765,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/gme/tool-gme/src/index.ts:16`](../packages/gme/tool-gme/src/index.ts)
+来源：[`packages/gme/tool-gme/src/index.ts:17`](../packages/gme/tool-gme/src/index.ts)
 
 <a id="deepseek-aidsh-tool-goal"></a>
 

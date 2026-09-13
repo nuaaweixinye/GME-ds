@@ -1,0 +1,8 @@
+# Opt-in GME Test Agent workflow tools. Does not mount tool-gme.
+- insert:
+    - id: gme-workflow
+      name: '@deepseek-ai/dsh-gme-workflow'
+      config:
+        backendRoot: !!js process.env.GME_TEST_AGENT_ROOT
+        pythonPath: !!js process.env.GME_TEST_AGENT_PYTHON ?? 'python'
+        autoStart: true

@@ -194,6 +194,7 @@
     { "path": "./packages/goal/command-goal" },
     { "path": "./packages/gme/tool-gme" },
     { "path": "./packages/gme/profile" },
+    { "path": "./packages/gme/workflow" },
     { "path": "./packages/feedback/command-feedback" },
     { "path": "./packages/schedule/schedule" },
     { "path": "./packages/context/time-context" },

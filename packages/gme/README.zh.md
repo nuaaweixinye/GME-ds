@@ -22,12 +22,13 @@ kind: "package-group"
 <a id="packages"></a>
 ## 包
 
-两个包将可复用项目行为与机器本地 profile composition 分离。
+各包分别负责项目工具、机器本地 profile 组合与 GME Test Agent 工作流。
 
 | 包 | 职责 |
 |---|---|
 | [`tool-gme/`](tool-gme/README.zh.md) | 提供 GME 项目状态、构建、测试、API 定位和交付工具 |
 | [`profile/`](profile/README.zh.md) | 将 GME 工具、外部 skills 和 WeKnora 组合成私有 profile |
+| [`workflow/`](workflow/README.zh.md) | 通过 Python 后端操作 GME Test Agent 任务，保留 Codex，并独立于 tool-gme |
 
 <a id="related-documentation"></a>
 ## 相关文档

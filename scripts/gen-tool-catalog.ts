@@ -49,6 +49,7 @@ import * as ToolCordis from '@deepseek-ai/dsh-tool-cordis'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
 import * as ToolGme from '../packages/gme/tool-gme/src/index.ts'
+import * as GmeWorkflow from '../packages/gme/workflow/src/index.ts'
 import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as ToolPty from '@deepseek-ai/dsh-tool-terminal'
@@ -230,6 +231,17 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'The GME tools validate a GME-ACIS checkout and constrained domain arguments before inspecting Git, locating APIs, or running CMake and GoogleTest through the mounted shell executor.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-gme-workflow',
+    dir: 'workflow',
+    source: 'packages/gme/workflow/src/index.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'ctx.subprocess (automatic backend startup)'],
+    writes: ['tool/call', 'tool/result', 'GME backend tasks and requested GitHub PRs'],
+    async mount(ctx) {
+      await ctx.plugin(GmeWorkflow, { backendRoot: 'GME-Test-Agent-catalog-placeholder', autoStart: false })
+    },
+    note: 'Opt-in GME Test Agent workflow bundle. The existing Python backend owns tasks, worktrees and validation; Codex remains the coding engine. No dependency on tool-gme. POST acceptance does not imply task completion.',
   },
   {
     pkg: '@deepseek-ai/dsh-plan-mode',

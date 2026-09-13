@@ -22,6 +22,10 @@ export async function apply(ctx) {
     requestListener(req, res) {
       res.setHeader('content-type', 'application/json')
       if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401).end('{}'); return }
+      if (req.method === 'GET' && req.url === '/api/jobs') {
+        res.end(JSON.stringify({ jobs: [{ id: 'job-1', status: 'running_agent' }] }))
+        return
+      }
       if (req.method !== 'GET' || req.url !== '/api/health') { res.writeHead(404).end('{}'); return }
       res.end(JSON.stringify({ ok: true, authenticated: true }))
     },

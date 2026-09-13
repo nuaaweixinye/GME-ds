@@ -82,38 +82,43 @@ async function setup(overrides: Partial<Workflow.Config> = {}, throughLoader = f
 }
 
 describe('GME workflow tools', () => {
-  it('reports the owning job rather than the failure identifier', async () => {
-    const { call } = await setup()
-    const result = await call('gme_workflow_query', { resource: 'failure', failure_id: 'failure-1', job_id: 'irrelevant-job' })
+  it('reports the owning job rather than the failure identifier, with observations merged', async () => {
+    const { call, requests } = await setup()
+    const result = await call('gme_check', { resource: 'failure', failure_id: 'failure-1', job_id: 'irrelevant-job' })
     expect(result.isError).not.toBe(true)
     const block = result.content[0]
     if (block?.type !== 'text') throw new Error('missing result')
-    expect(JSON.parse(block.text)).toMatchObject({ job_id: 'owning-job' })
+    const value = JSON.parse(block.text) as { job_id: string }
+    expect(value).toMatchObject({ job_id: 'owning-job' })
+    expect(requests.map(r => r.url)).toContain('/api/failures/failure-1/observations')
   })
   it('loads named plugin exports through a real Cordis configuration', async () => {
     const { call, requests } = await setup({}, true)
-    const result = await call('gme_workflow_query', { resource: 'jobs' })
+    const result = await call('gme_check', { resource: 'jobs' })
     expect(result.isError).not.toBe(true)
     expect(JSON.stringify(result)).toContain('job-1')
     expect(requests.at(-1)?.url).toBe('/api/jobs')
   })
-  it('submits selected interfaces and reports acceptance without claiming validation passed', async () => {
+  it('submits selected interfaces and returns a poll signpost without claiming completion', async () => {
     const { call, requests } = await setup()
-    const result = await call('gme_workflow_create', { kind: 'tests', module: 'laws', interface_ids: ['law-1'] })
+    const result = await call('gme_generate', { kind: 'tests', module: 'laws', interface_ids: ['law-1'] })
     expect(result.isError).not.toBe(true)
     expect(requests.at(-1)).toEqual({ method: 'POST', url: '/api/jobs/test-generation', body: { module: 'laws', interface_ids: ['law-1'] } })
-    expect(JSON.stringify(result)).toContain('running_agent')
-    expect(JSON.stringify(result)).toContain('job-1')
+    const block = result.content[0]
+    if (block?.type !== 'text') throw new Error('missing result')
+    expect((JSON.parse(block.text) as { suggested_next: unknown }).suggested_next).toMatchObject({ phase: 'poll', tool: 'gme_check', arguments: { resource: 'job', job_id: 'job-1' } })
   })
 
   it.each([
-    ['gme_workflow_query', { resource: 'events', job_id: 'job-1', after: 42 }, 'GET', '/api/jobs/job-1/events?after=42', undefined],
-    ['gme_workflow_query', { resource: 'catalog', module: 'base' }, 'GET', '/api/interface-catalogs/base', undefined],
-    ['gme_workflow_create', { kind: 'fix', failure_ids: ['failure-1', 'failure-2'] }, 'POST', '/api/fix-jobs', { failure_ids: ['failure-1', 'failure-2'] }],
-    ['gme_workflow_action', { action: 'memory_audit', job_id: 'job-1', filter: 'LawSuite.Boundary' }, 'POST', '/api/jobs/job-1/memory-audit', { gtest_filter: 'LawSuite.Boundary' }],
-    ['gme_workflow_action', { action: 'extend', job_id: 'job-1', goal: '异常参数' }, 'POST', '/api/jobs/job-1/extend-tests', { api_name: '异常参数' }],
-    ['gme_workflow_create', { kind: 'tests', module: 'laws', goal: 'law-1 的边界条件' }, 'POST', '/api/jobs/test-generation', { module: 'laws', api_name: 'law-1 的边界条件' }],
-    ['gme_workflow_submit', { kind: 'selected_tests', job_id: 'job-1', tests: [{ file: 'src/base.cpp', suite: 'BaseSuite', name: 'Boundary' }] }, 'POST', '/api/jobs/job-1/selected-tests-pr', { tests: [{ file: 'src/base.cpp', suite: 'BaseSuite', name: 'Boundary' }] }],
+    ['gme_check', { resource: 'events', job_id: 'job-1', after: 42 }, 'GET', '/api/jobs/job-1/events?after=42', undefined],
+    ['gme_check', { resource: 'catalog', module: 'base' }, 'GET', '/api/interface-catalogs/base', undefined],
+    ['gme_check', { resource: 'test_results', job_id: 'job-1' }, 'GET', '/api/jobs/job-1/test-results', undefined],
+    ['gme_generate', { kind: 'fix', failure_ids: ['failure-1', 'failure-2'] }, 'POST', '/api/fix-jobs', { failure_ids: ['failure-1', 'failure-2'] }],
+    ['gme_generate', { kind: 'extend', job_id: 'job-1', goal: '异常参数' }, 'POST', '/api/jobs/job-1/extend-tests', { api_name: '异常参数' }],
+    ['gme_generate', { kind: 'retry', job_id: 'job-1' }, 'POST', '/api/jobs/job-1/retry-tests', {}],
+    ['gme_generate', { kind: 'tests', module: 'laws', goal: 'law-1 的边界条件' }, 'POST', '/api/jobs/test-generation', { module: 'laws', api_name: 'law-1 的边界条件' }],
+    ['gme_decide', { decision: 'selected_tests_pr', job_id: 'job-1', confirm: true, tests: [{ file: 'src/base.cpp', suite: 'BaseSuite', name: 'Boundary' }] }, 'POST', '/api/jobs/job-1/selected-tests-pr', { tests: [{ file: 'src/base.cpp', suite: 'BaseSuite', name: 'Boundary' }] }],
+    ['gme_decide', { decision: 'skip_pr', job_id: 'job-1', confirm: true }, 'POST', '/api/jobs/job-1/skip-pr', {}],
   ])('routes %s through the existing API contract', async (name, args, method, url, body) => {
     const { call, requests } = await setup()
     const result = await call(name, args)
@@ -121,54 +126,57 @@ describe('GME workflow tools', () => {
     expect(requests.at(-1)).toEqual({ method, url, body })
   })
 
+  it('refuses gme_decide without confirm and never sends the request', async () => {
+    const { call, requests } = await setup()
+    const result = await call('gme_decide', { decision: 'delete_job', job_id: 'job-1' })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toMatch(/explicit user consent/)
+    expect(requests.filter(r => r.method === 'POST')).toHaveLength(0)
+  })
   it('returns a backend conflict without retrying the mutation', async () => {
     const { call, requests, token } = await setup()
-    const result = await call('gme_workflow_action', { action: 'build', job_id: 'broken' })
+    const result = await call('gme_decide', { decision: 'create_pr', job_id: 'broken', confirm: true })
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result)).toContain('already active')
     expect(JSON.stringify(result)).not.toContain(token)
     expect(requests.filter(r => r.method === 'POST')).toHaveLength(1)
   })
-
   it('rejects missing selections and unsafe identifiers before submitting a job', async () => {
     const { call, requests } = await setup()
     for (const [name, args] of [
-      ['gme_workflow_create', { kind: 'fix', failure_ids: [] }],
-      ['gme_workflow_create', { kind: 'tests', module: 'laws', interface_ids: ['law-1'], goal: 'would be discarded' }],
-      ['gme_workflow_action', { action: 'build', job_id: '../config' }],
-      ['gme_workflow_submit', { kind: 'selected_tests', job_id: 'job-1', tests: [] }],
+      ['gme_generate', { kind: 'fix', failure_ids: [] }],
+      ['gme_generate', { kind: 'tests', module: 'laws', interface_ids: ['law-1'], goal: 'would be discarded' }],
+      ['gme_generate', { kind: 'extend', job_id: '../config', goal: 'x' }],
+      ['gme_decide', { decision: 'selected_tests_pr', job_id: 'job-1', confirm: true, tests: [] }],
     ] as const) expect((await call(name, args)).isError).toBe(true)
     expect(requests.filter(r => r.method === 'POST')).toHaveLength(0)
   })
-
   it('pages large reports and rejects oversized HTTP bodies', async () => {
     const { call } = await setup({ pageChars: 1000 })
-    const first = await call('gme_workflow_query', { resource: 'artifacts', job_id: 'large' })
+    const first = await call('gme_check', { resource: 'artifacts', job_id: 'large' })
     expect(first.isError).not.toBe(true)
     const block = first.content[0]
     if (block?.type !== 'text') throw new Error('missing result')
     const value = JSON.parse(block.text) as { next_offset: number; content: string }
     expect(value.next_offset).toBe(1000)
     expect(value.content.length).toBe(1000)
-    const second = await call('gme_workflow_query', { resource: 'artifacts', job_id: 'large', offset: value.next_offset })
+    const second = await call('gme_check', { resource: 'artifacts', job_id: 'large', offset: value.next_offset })
     expect(second.isError).not.toBe(true)
     const limited = await setup({ maxResponseBytes: 1024 })
-    expect((await limited.call('gme_workflow_query', { resource: 'artifacts', job_id: 'large' })).isError).toBe(true)
+    expect((await limited.call('gme_check', { resource: 'artifacts', job_id: 'large' })).isError).toBe(true)
   })
-
   it('honors a query timeout and abort without replaying operations', async () => {
     const { call } = await setup({ timeoutMs: 40 })
-    expect((await call('gme_workflow_query', { resource: 'job', job_id: 'slow' })).isError).toBe(true)
+    expect((await call('gme_check', { resource: 'job', job_id: 'slow' })).isError).toBe(true)
     const controller = new AbortController()
     controller.abort()
-    expect((await call('gme_workflow_query', { resource: 'jobs' }, controller.signal)).isError).toBe(true)
+    expect((await call('gme_check', { resource: 'jobs' }, controller.signal)).isError).toBe(true)
   })
-
   it('unregisters its tools on disposal and leaves a reused backend available', async () => {
     const { call, fiber, requests } = await setup()
-    await call('gme_workflow_query', { resource: 'health' })
+    await call('gme_check', { resource: 'jobs' })
     await fiber.dispose()
-    expect((await call('gme_workflow_query', { resource: 'health' })).isError).toBe(true)
+    expect((await call('gme_check', { resource: 'jobs' })).isError).toBe(true)
     expect(requests.length).toBeGreaterThan(0)
   })
 })

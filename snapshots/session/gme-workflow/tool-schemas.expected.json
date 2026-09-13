@@ -107,132 +107,23 @@
       }
     },
     {
-      "name": "gme_workflow_action",
-      "description": "Continue/retry a task, build, test or audit memory. cleanup, delete and remove_tests require a user request. Aborting a wait does not cancel background work.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "job_id": {
-            "type": "string"
-          },
-          "action": {
-            "type": "string",
-            "enum": [
-              "extend",
-              "retry",
-              "build",
-              "test",
-              "memory_audit",
-              "remove_tests",
-              "cleanup",
-              "delete"
-            ]
-          },
-          "goal": {
-            "type": "string"
-          },
-          "interface_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "filter": {
-            "type": "string"
-          },
-          "tests": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "file": {
-                  "type": "string"
-                },
-                "suite": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "file",
-                "suite",
-                "name"
-              ]
-            }
-          }
-        },
-        "required": [
-          "job_id",
-          "action"
-        ]
-      }
-    },
-    {
-      "name": "gme_workflow_create",
-      "description": "Create a test task, batch, or repair of recorded failures. Returns accepted tasks; query progress before claiming completion.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "tests",
-              "batch",
-              "fix"
-            ]
-          },
-          "module": {
-            "type": "string"
-          },
-          "goal": {
-            "type": "string",
-            "description": "Free-form test target, instead of interface_ids. Batch requires interface_ids."
-          },
-          "interface_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "failure_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "batch_size": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      }
-    },
-    {
-      "name": "gme_workflow_query",
-      "description": "Read GME interfaces, tasks, progress, failures or verification reports. Does not start coding work. Large reports return continuation offsets.",
+      "name": "gme_check",
+      "description": "Side-effect-free reads: interface catalogs, tasks, events, failures (with observations), test results and artifacts. Does not start coding work; large reports return continuation offsets.",
       "parameters": {
         "type": "object",
         "properties": {
           "resource": {
             "type": "string",
             "enum": [
-              "health",
-              "environment",
               "catalogs",
               "catalog",
               "jobs",
               "job",
               "events",
-              "test_results",
-              "artifacts",
               "failures",
               "failure",
-              "observations"
+              "test_results",
+              "artifacts"
             ]
           },
           "job_id": {
@@ -259,21 +150,24 @@
       }
     },
     {
-      "name": "gme_workflow_submit",
-      "description": "Push changes and create a GitHub PR only when requested. known_failures adds skips; selected_tests submits the listed tests; task submits task changes.",
+      "name": "gme_decide",
+      "description": "Outward or destructive decisions — PRs, skips, test removal, cleanup, deletion. Only call after showing the user the situation and getting explicit consent; pass confirm: true to execute.",
       "parameters": {
         "type": "object",
         "properties": {
-          "job_id": {
-            "type": "string"
-          },
-          "kind": {
+          "decision": {
             "type": "string",
             "enum": [
-              "task",
-              "known_failures",
-              "selected_tests"
+              "skip_pr",
+              "selected_tests_pr",
+              "create_pr",
+              "remove_tests",
+              "delete_job",
+              "cleanup"
             ]
+          },
+          "job_id": {
+            "type": "string"
           },
           "tests": {
             "type": "array",
@@ -297,10 +191,62 @@
                 "name"
               ]
             }
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Set true only after the user explicitly agreed to this decision."
           }
         },
         "required": [
-          "job_id",
+          "decision",
+          "job_id"
+        ]
+      }
+    },
+    {
+      "name": "gme_generate",
+      "description": "Autonomously drive GME test generation and repair: create tasks from interfaces or a goal, batch, fix recorded failures, extend or retry a task. Poll progress with gme_check until needs_review, then report and wait for the user.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tests",
+              "batch",
+              "fix",
+              "extend",
+              "retry"
+            ]
+          },
+          "module": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Free-form test target, instead of interface_ids. Batch requires interface_ids."
+          },
+          "interface_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "failure_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "batch_size": {
+            "type": "integer"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "Task to extend or retry (kind=extend|retry)."
+          }
+        },
+        "required": [
           "kind"
         ]
       }
